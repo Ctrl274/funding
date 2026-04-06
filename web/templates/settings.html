@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+    <meta charset="UTF-8">
+    <title>Settings</title>
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+    <nav>
+        <a href="/">Dashboard</a>
+        <a href="/settings" class="active">Settings</a>
+        <a href="/positions">Positions</a>
+        <a href="/history">History</a>
+    </nav>
+
+    <div class="container">
+        <div class="panel">
+            <h2>Monitor Settings</h2>
+            <form id="settings-form">
+                <div class="form-group">
+                    <label>Monitor Enabled</label>
+                    <input type="checkbox" name="monitor.enabled" id="monitor-enabled">
+                </div>
+                <div class="form-group">
+                    <label>Polling Interval (seconds)</label>
+                    <input type="number" name="monitor.polling_interval" id="polling-interval" value="60">
+                </div>
+                <div class="form-group">
+                    <label>Min Rate Diff (%)</label>
+                    <input type="number" step="0.001" name="strategy.min_rate_diff" id="min-rate-diff" value="0.01">
+                </div>
+                <div class="form-group">
+                    <label>Max Concurrent</label>
+                    <input type="number" name="strategy.max_concurrent" id="max-concurrent" value="3">
+                </div>
+                <div class="form-group">
+                    <label>Lark Webhook URL</label>
+                    <input type="text" name="notification.lark_webhook" id="lark-webhook" placeholder="https://...">
+                </div>
+                <button type="submit">Save & Reload</button>
+            </form>
+        </div>
+    </div>
+
+    <script src="/static/app.js"></script>
+    <script>
+        loadConfig();
+        document.getElementById("settings-form").addEventListener("submit", saveConfig);
+    </script>
+</body>
+</html>

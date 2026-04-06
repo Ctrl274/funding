@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+    <meta charset="UTF-8">
+    <title>Positions</title>
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+    <nav>
+        <a href="/">Dashboard</a>
+        <a href="/settings">Settings</a>
+        <a href="/positions" class="active">Positions</a>
+        <a href="/history">History</a>
+    </nav>
+
+    <div class="container">
+        <div class="panel">
+            <h2>Current Positions</h2>
+            <table id="positions-table">
+                <thead>
+                    <tr>
+                        <th>Symbol</th>
+                        <th>Long Exchange</th>
+                        <th>Short Exchange</th>
+                        <th>Quantity</th>
+                        <th>Open Time</th>
+                        <th>Action</th>
+                    </tr>
+                </thead>
+                <tbody id="positions-body">
+                    <tr><td colspan="6">Loading...</td></tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <script src="/static/app.js"></script>
+    <script>
+        refreshPositions();
+        setInterval(refreshPositions, 5000);
+    </script>
+</body>
+</html>

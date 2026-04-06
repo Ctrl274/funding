@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+    <meta charset="UTF-8">
+    <title>History</title>
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+    <nav>
+        <a href="/">Dashboard</a>
+        <a href="/settings">Settings</a>
+        <a href="/positions">Positions</a>
+        <a href="/history" class="active">History</a>
+    </nav>
+
+    <div class="container">
+        <div class="panel">
+            <h2>Trade History</h2>
+            <table id="history-table">
+                <thead>
+                    <tr>
+                        <th>Time</th>
+                        <th>Symbol</th>
+                        <th>Pair</th>
+                        <th>Rate Diff</th>
+                        <th>Result</th>
+                        <th>Profit</th>
+                    </tr>
+                </thead>
+                <tbody id="history-body">
+                    <tr><td colspan="6">Loading...</td></tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <script src="/static/app.js"></script>
+    <script>
+        refreshHistory();
+        setInterval(refreshHistory, 10000);
+    </script>
+</body>
+</html>

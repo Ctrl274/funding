@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+    <meta charset="UTF-8">
+    <title>Funding Arbitrage - Dashboard</title>
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+    <nav>
+        <a href="/" class="active">Dashboard</a>
+        <a href="/settings">Settings</a>
+        <a href="/positions">Positions</a>
+        <a href="/history">History</a>
+    </nav>
+
+    <div class="container">
+        <div class="panel">
+            <h2>System Status</h2>
+            <div class="status-grid">
+                <div class="status-item">
+                    <span class="label">Monitor</span>
+                    <span class="value" id="monitor-status">Loading...</span>
+                </div>
+                <div class="status-item">
+                    <span class="label">Next Settlement</span>
+                    <span class="value" id="next-settlement">Loading...</span>
+                </div>
+                <div class="status-item">
+                    <span class="label">Current Positions</span>
+                    <span class="value" id="position-count">Loading...</span>
+                </div>
+            </div>
+        </div>
+
+        <div class="panel">
+            <h2>Funding Rates (Live)</h2>
+            <table id="rates-table">
+                <thead>
+                    <tr>
+                        <th>Symbol</th>
+                        <th>Binance</th>
+                        <th>Bybit</th>
+                        <th>BYDFi</th>
+                        <th>MEXC</th>
+                        <th>Max Diff</th>
+                    </tr>
+                </thead>
+                <tbody id="rates-body">
+                    <tr><td colspan="6">Loading...</td></tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <script src="/static/app.js"></script>
+    <script>
+        refreshStatus();
+        refreshRates();
+        setInterval(refreshRates, 5000);
+    </script>
+</body>
+</html>
