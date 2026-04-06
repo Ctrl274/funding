@@ -12,11 +12,11 @@ class BybitAdapter(ExchangeAdapter):
 
     def __init__(self, api_key: str, api_secret: str, testnet: bool = False):
         super().__init__(api_key, api_secret, testnet)
-        opts = {"defaultType": "swap"}
+        config = {"defaultType": "swap"}
         if testnet:
-            opts["testnet"] = True
+            config["testnet"] = True
 
-        self._client = ccxt.bybit(options=opts)
+        self._client = ccxt.bybit(config)
         if api_key and api_secret:
             self._client.apiKey = api_key
             self._client.secret = api_secret
