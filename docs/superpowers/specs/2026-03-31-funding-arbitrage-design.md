@@ -38,7 +38,7 @@
 | Component | Responsibility |
 |-----------|---------------|
 | Config | 读写 YAML 配置文件，运行时热加载 |
-| Monitor Loop | 每 N 秒轮询四所资金费率，检查是否在运行时间窗口内 |
+| Monitor Loop | 每 N 秒轮询四所资金费率，基于 API 返回的 next_settlement 动态判断是否在结算窗口内 |
 | Strategy Engine | 两两配对计算费率差，过滤阈值，按并发数排序选机会 |
 | Exchange Adapter | 封装 ccxt，统一接口：Binance/Bybit/MEXC；BYDFi 用原生 API |
 | Execution Engine | FOK 限价单下单、成交监听、部分成交则对冲止损 |
@@ -47,12 +47,13 @@
 
 ### Data Flow
 
-1. Monitor Loop 每 60s 轮询四所最新资金费率
-2. Strategy Engine 两两配对，筛除 < min_rate_diff 的组合
-3. 如果并发数未满，选最优机会（费率差最大）
+1. Monitor Loop 每 60s 轮询四所最新资金费率（含 next_settlement 时间戳）
+2. Monitor 基于各交易所 API 返回的 next_settlement 判断是否进入结算前窗口（pre_settlement_seconds），支持任意结算频率（1h / 2h / 4h / 8h 等）
+3. Strategy Engine 两两配对，筛除 < min_rate_diff 的组合
+4. 如果并发数未满，选最优机会（费率差最大）
 4. Execution Engine 同时向两边发 FOK 限价单
 5. 监听成交：两边都成 → 挂平仓单；一边不成 → 取消另一边 + 止损 + 告警
-6. 结算时间点前 10 分钟触发开仓，到点后自动平仓
+6. 到结算时间后自动平仓
 7. 每笔结果无论成功失败均发 Lark 详细通知
 
 ## 3. 配置文件
@@ -98,8 +99,8 @@ strategy:
 # 监控控制
 monitor:
   enabled: true
-  # 时间段列表，空或无此字段 = 24h 全天候
-  # 格式: "HH:MM-HH:MM" UTC
+  # 时间段列表（降级兜底用，当 API 获取失败时启用）
+  # 空或无此字段 = 24h 全天候；格式: "HH:MM-HH:MM" UTC
   time_windows:
     - "23:50-00:10"
     - "07:50-08:10"
@@ -164,10 +165,16 @@ notification:
 
 实际手续费从交易所 API 实时拉取（maker fee tier），滑点根据下单前查深度估算。
 
-## 7. 结算时间表
+## 7. 结算时间
 
-UTC 00:00 / 08:00 / 16:00 各结算一次。
-程序在每次结算前 10 分钟扫描机会并开仓，结算后立即平仓。
+结算时间从各交易所 API 的 `nextFundingTime` 字段动态获取，不再硬编码时间点。
+
+- **Binance USDT-M**: 8h 结算（00:00 / 08:00 / 16:00 UTC）
+- **Bybit USDT 永续**: 8h 结算（00:00 / 08:00 / 16:00 UTC）
+- **MEXC**: 8h 结算（00:00 / 08:00 / 16:00 UTC）
+- **BYDFi**: 需验证（API 有 `nextFundingTime` 字段）
+
+程序在 `next_settlement - pre_settlement_seconds` 时触发开仓扫描，到结算时间后自动平仓。支持任意结算频率（1h / 2h / 4h / 8h 等），无需修改代码。
 
 ## 8. 技术栈
 
@@ -220,7 +227,7 @@ funding_arbitrage/
 ## 10. Error Handling
 
 - 交易所 API 超时：重试 3 次，间隔指数退避
-- WebSocket 断连：自动重连，缓存最后已知数据
+- 结算前窗口判断：基于 API 返回的 next_settlement 动态计算，adapter 异常时降级回退到 time_windows
 - 单边 FOK 未成交：取消另一边，止损告警
 - 结算时持仓无法平仓：立即告警，保留手动处理接口
 - Lark 通知发送失败：降级写本地日志

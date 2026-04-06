@@ -102,6 +102,7 @@ strategy:
 # 监控控制
 monitor:
   enabled: true
+  # time_windows: 降级兜底（API 获取失败时启用），空=24h
   time_windows:
     - "23:50-00:10"
     - "07:50-08:10"
@@ -1385,14 +1386,15 @@ from .exchanges.base import FundingRate
 class ArbitrageOpportunity:
     """套利机会"""
     symbol: str
-    high_exchange: str      # 做多（收资金费）
-    low_exchange: str       # 做空（付资金费）
-    high_rate: float        # 高费率（小数）
-    low_rate: float         # 低费率（小数）
+    high_exchange: str        # 做多（收资金费）
+    low_exchange: str         # 做空（付资金费）
+    high_rate: float          # 高费率（小数）
+    low_rate: float           # 低费率（小数）
     rate_diff_percent: float  # 费率差（百分比）
     estimated_profit: float  # 预估收益（扣除手续费前）
-    side_a: str             # A 边方向 ("BUY"=做多)
-    side_b: str             # B 边方向 ("SELL"=做空)
+    side_a: str               # A 边方向 ("BUY"=做多)
+    side_b: str               # B 边方向 ("SELL"=做空)
+    next_settlement: int      # Unix 时间戳，下次结算时间（支持任意结算频率）
 
 
 class StrategyEngine:
@@ -1470,6 +1472,9 @@ class StrategyEngine:
                         estimated_profit=0,  # 后续由 executor 填充
                         side_a="BUY",
                         side_b="SELL",
+                        next_settlement=rates_a[sym].next_settlement
+                        if high_ex == ex_a
+                        else rates_b[sym].next_settlement,
                     ))
 
         # 按费率差降序，取前 max_concurrent 个
@@ -1820,12 +1825,9 @@ class MonitorLoop:
     """
     Monitor Loop。
     使用 APScheduler 每 N 秒触发一次扫描。
+    结算时机基于各交易所 API 返回的 next_settlement 动态计算，
+    支持任意结算频率（1h / 2h / 4h / 8h 等）。
     """
-
-    # 结算时间点（UTC）：00:00 / 08:00 / 16:00
-    SETTLEMENT_HOURS = [0, 8, 16]
-    SETTLEMENT_MINUTES = [0]
-    PRE_SETTLEMENT_SECONDS = 600  # 结算前 10 分钟
 
     def __init__(
         self,
@@ -1868,8 +1870,8 @@ class MonitorLoop:
         if not self._config.monitor.enabled:
             return
 
-        if not self._is_within_time_window():
-            logger.debug("Outside time window, skipping")
+        if not self._is_near_settlement():
+            logger.debug("Not within pre-settlement window, skipping")
             return
 
         logger.info("Scanning funding rates...")
@@ -1989,16 +1991,51 @@ class MonitorLoop:
         return self._current_positions
 
     def get_next_settlement(self) -> Optional[datetime]:
-        """获取下次结算时间"""
-        now = datetime.now(timezone.utc)
-        for hour in self.SETTLEMENT_HOURS:
-            t = now.replace(hour=hour, minute=0, second=0, microsecond=0)
-            if t > now:
-                return t
-        # 下一天
-        t = now.replace(hour=0, minute=0, second=0, microsecond=0)
-        t = t.replace(day=now.day + 1)
-        return t
+        """从实时 API 数据获取下次结算时间"""
+        all_rates = self._collect_rates()
+        return self._get_next_settlement_from_rates(all_rates)
+
+    def _get_next_settlement_from_rates(
+        self, all_rates: Dict
+    ) -> Optional[datetime]:
+        """从费率数据中找到最近的未来 next_settlement 时间戳"""
+        import time
+        now_ts = time.time()
+        nearest_ts: Optional[int] = None
+
+        for ex_rates in all_rates.values():
+            for fr in ex_rates.values():
+                if fr.next_settlement > now_ts:
+                    if nearest_ts is None or fr.next_settlement < nearest_ts:
+                        nearest_ts = fr.next_settlement
+
+        if nearest_ts is None:
+            return None
+        return datetime.fromtimestamp(nearest_ts, tz=timezone.utc)
+
+    def _is_near_settlement(self) -> bool:
+        """
+        判断当前是否在结算前窗口内。
+        基于各交易所 API 返回的 next_settlement 动态计算。
+        adapter 异常时降级回退到 time_windows。
+        """
+        import time
+        pre_seconds = self._config.strategy.pre_settlement_seconds
+        now_ts = time.time()
+
+        for name, adapter in self._adapters.items():
+            try:
+                rates = adapter.get_funding_rates()
+                for fr in rates.values():
+                    if fr.next_settlement > 0:
+                        time_to_settlement = fr.next_settlement - now_ts
+                        if 0 < time_to_settlement <= pre_seconds:
+                            return True
+            except Exception:
+                pass
+
+        # Fallback: use time window if rate fetch fails
+        return self._is_within_time_window()
 ```
 
 - [ ] **Step 4: 跑测试验证通过**
@@ -2421,9 +2458,19 @@ def create_app(
     def api_status():
         """系统状态"""
         monitor = app.monitor
+        import time, math
+        settlement_ts = None
+        countdown_seconds = None
+        if monitor:
+            settlement_dt = monitor.get_next_settlement()
+            if settlement_dt:
+                settlement_ts = settlement_dt.timestamp()
+                countdown_seconds = math.floor(max(0, settlement_ts - time.time()))
         return jsonify({
             "monitor_enabled": app.config_obj.monitor.enabled if app.config_obj else True,
-            "next_settlement": monitor.get_next_settlement().isoformat() if monitor else None,
+            "next_settlement": settlement_dt.isoformat() if settlement_dt else None,
+            "next_settlement_ts": settlement_ts,
+            "countdown_seconds": countdown_seconds,
             "current_positions": len(monitor.get_positions()) if monitor else 0,
         })
 
@@ -2432,9 +2479,8 @@ def create_app(
         """实时资金费率"""
         monitor = app.monitor
         if not monitor:
-            return jsonify({})
+            return jsonify([])
         all_rates = monitor.get_current_rates()
-        # 展平为列表
         rows = []
         symbols = set()
         for ex_rates in all_rates.values():
@@ -2444,9 +2490,11 @@ def create_app(
             for ex, rates in all_rates.items():
                 fr = rates.get(sym)
                 if fr:
-                    row[ex] = fr.rate_percent
+                    row[f"{ex}_rate"] = fr.rate_percent
+                    row[f"{ex}_next_settlement_ts"] = fr.next_settlement
                 else:
-                    row[ex] = None
+                    row[f"{ex}_rate"] = None
+                    row[f"{ex}_next_settlement_ts"] = None
             rows.append(row)
         return jsonify(rows)
 
