@@ -112,8 +112,18 @@ def create_app(monitor_ref=None, config_ref=None, db_ref=None):
             return jsonify({"error": "config not available"}), 500
         try:
             data = request.get_json()
+            if not isinstance(data, dict):
+                return jsonify({"error": "expected JSON object"}), 400
+            # Only allow updating known top-level keys
+            allowed_keys = {"monitor", "strategy", "notification"}
+            unknown = set(data.keys()) - allowed_keys
+            if unknown:
+                return jsonify({"error": f"unknown keys: {', '.join(unknown)}"}), 400
+            # Merge into existing config (preserves exchanges section)
+            merged = app.config_obj._raw.copy()
+            merged.update(data)
             with open(app.config_obj._path, "w", encoding="utf-8") as f:
-                yaml.dump(data, f, allow_unicode=True)
+                yaml.dump(merged, f, allow_unicode=True)
             app.config_obj.reload()
             return jsonify({"status": "ok"})
         except Exception as e:
