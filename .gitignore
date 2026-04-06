@@ -1,3 +1,9 @@
 .worktrees/
 .idea/
 *.iml
+config.yaml
+venv/
+__pycache__/
+*.pyc
+*.db
+.gstack/
