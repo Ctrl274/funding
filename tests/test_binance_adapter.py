@@ -107,3 +107,15 @@ def test_get_ticker_price_returns_none_on_error():
         price = adapter.get_ticker_price("BTC-USDT")
 
     assert price is None
+
+
+def test_get_order_status_returns_unknown_on_api_error():
+    """
+    Bug fix: API 请求失败（rate limit / 网络抖动）时不应静默返回 'unfilled'，
+    应返回 'unknown' 以便 executor 正确处理。
+    """
+    with patch("requests.get", side_effect=Exception("rate limit exceeded")):
+        adapter = BinanceAdapter("key", "secret")
+        status = adapter.get_order_status("BTC-USDT", "order123")
+
+    assert status == "unknown"

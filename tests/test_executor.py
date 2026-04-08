@@ -209,3 +209,97 @@ class TestOrderResult:
         assert result.error_a is None
         assert result.error_b is None
         assert result.timestamp > 0
+
+
+class TestGetOrderStatusUnknown:
+    """
+    Bug fix: 当 get_order_status 返回 'unknown'（API 请求失败）时，
+    executor 应继续轮询，不应静默放弃。
+    """
+
+    def test_a_returns_unknown_keeps_polling_until_filled(self):
+        """A 返回 unknown 时继续轮询，最终成交 -> filled"""
+        adapter_a = make_mock_adapter("binance")
+        adapter_a.place_fok_order.return_value = "order_a"
+        adapter_a.get_order_status.return_value = "filled"
+
+        adapter_b = make_mock_adapter("bybit")
+        adapter_b.place_fok_order.return_value = "order_b"
+        # B: 第一次 unknown，后面都是 filled
+        adapter_b.get_order_status.return_value = "filled"
+        # 用 callable 实现: 第一次返回 unknown，后面返回 filled
+        call_count = [0]
+        def b_status(*args):
+            call_count[0] += 1
+            return "unknown" if call_count[0] == 1 else "filled"
+        adapter_b.get_order_status.side_effect = b_status
+
+        engine = ExecutionEngine(timeout=5, poll_interval=0.01)
+        result = engine.execute_arbitrage(
+            symbol="BTC-USDT",
+            adapter_a=adapter_a,
+            adapter_b=adapter_b,
+            side_a="BUY",
+            side_b="SELL",
+            quantity=1,
+            price_a=50000,
+            price_b=50001,
+        )
+
+        assert result.status == "filled"
+
+    def test_b_returns_unknown_keeps_polling_until_filled(self):
+        """B 返回 unknown 时继续轮询，最终成交 -> filled"""
+        adapter_a = make_mock_adapter("binance")
+        adapter_a.place_fok_order.return_value = "order_a"
+        # A: 第一次 unknown，后面都是 filled
+        call_count = [0]
+        def a_status(*args):
+            call_count[0] += 1
+            return "unknown" if call_count[0] == 1 else "filled"
+        adapter_a.get_order_status.side_effect = a_status
+
+        adapter_b = make_mock_adapter("bybit")
+        adapter_b.place_fok_order.return_value = "order_b"
+        adapter_b.get_order_status.return_value = "filled"
+
+        engine = ExecutionEngine(timeout=5, poll_interval=0.01)
+        result = engine.execute_arbitrage(
+            symbol="BTC-USDT",
+            adapter_a=adapter_a,
+            adapter_b=adapter_b,
+            side_a="BUY",
+            side_b="SELL",
+            quantity=1,
+            price_a=50000,
+            price_b=50001,
+        )
+
+        assert result.status == "filled"
+
+    def test_unknown_always_until_timeout(self):
+        """两边都一直返回 unknown -> timeout（不崩溃，不放弃轮询）"""
+        adapter_a = make_mock_adapter("binance")
+        adapter_a.place_fok_order.return_value = "order_a"
+        adapter_a.get_order_status.return_value = "unknown"
+        adapter_a.cancel_order.return_value = True
+
+        adapter_b = make_mock_adapter("bybit")
+        adapter_b.place_fok_order.return_value = "order_b"
+        adapter_b.get_order_status.return_value = "unknown"
+        adapter_b.cancel_order.return_value = True
+
+        engine = ExecutionEngine(timeout=0.1, poll_interval=0.01)
+        result = engine.execute_arbitrage(
+            symbol="BTC-USDT",
+            adapter_a=adapter_a,
+            adapter_b=adapter_b,
+            side_a="BUY",
+            side_b="SELL",
+            quantity=1,
+            price_a=50000,
+            price_b=50001,
+        )
+
+        # 应该超时而不是抛出异常
+        assert result.status == "timeout"

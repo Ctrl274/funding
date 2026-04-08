@@ -297,7 +297,7 @@ class BinanceAdapter(ExchangeAdapter):
                 return "cancelled"
             return "unfilled"
         except Exception:
-            return "unfilled"
+            return "unknown"
 
     def get_position(self, symbol: str) -> Optional[Dict]:
         """Get position info via v2 endpoint."""

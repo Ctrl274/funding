@@ -121,18 +121,21 @@ class BybitAdapter(ExchangeAdapter):
     def get_order_status(self, symbol: str, order_id: str) -> str:
         try:
             order = self._client.fetch_order(order_id, self._normalize_symbol(symbol))
-            if order.get("status") == "closed":
-                filled = float(order.get("filled", 0))
-                amount = float(order.get("amount", 1))
-                if filled == amount:
-                    return "filled"
-                elif filled > 0:
-                    return "partial"
-                else:
-                    return "cancelled"
+            filled = float(order.get("filled", 0))
+            amount = float(order.get("amount", 1))
+            if filled == amount:
+                return "filled"
+            elif filled > 0:
+                return "partial"
+            # IOC 订单撮合后 ccxt 可能返回 "open" 或 "new" 而非 "closed"
+            status = order.get("status", "")
+            if status in ("cancelled", "rejected", "canceled"):
+                return "cancelled"
+            if status == "closed":
+                return "cancelled"
             return "unfilled"
         except Exception:
-            return "unfilled"
+            return "unknown"
 
     def get_position(self, symbol: str) -> Optional[Dict]:
         try:

@@ -66,3 +66,35 @@ def test_get_order_status_filled():
         status = adapter.get_order_status("BTC-USDT", "order1")
 
     assert status == "filled"
+
+
+def test_get_order_status_filled_when_status_is_open():
+    """
+    Bug fix: IOC 订单撮合成功后，ccxt 可能返回 status='open' 而非 'closed'，
+    此时仍应根据 filled == amount 判断为 filled。
+    """
+    mock_exchange = MagicMock()
+    # Bybit IOC 订单撮合后，ccxt 可能返回 "open" 但 filled == amount
+    mock_exchange.fetch_order.return_value = {"status": "open", "filled": 5.0, "amount": 5.0}
+
+    with patch("ccxt.bybit", return_value=mock_exchange):
+        adapter = BybitAdapter("key", "secret")
+        status = adapter.get_order_status("BTC-USDT", "order1")
+
+    assert status == "filled"
+
+
+def test_get_order_status_returns_unknown_on_api_error():
+    """
+    Bug fix: API 请求失败（rate limit / 网络抖动）时不应静默返回 'unfilled'，
+    应返回 'unknown' 以便 executor 正确处理。
+    """
+    import logging
+    mock_exchange = MagicMock()
+    mock_exchange.fetch_order.side_effect = Exception("rate limit exceeded")
+
+    with patch("ccxt.bybit", return_value=mock_exchange):
+        adapter = BybitAdapter("key", "secret")
+        status = adapter.get_order_status("BTC-USDT", "order1")
+
+    assert status == "unknown"
