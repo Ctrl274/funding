@@ -107,6 +107,8 @@ def create_app(monitor_ref=None, config_ref=None, db_ref=None):
     def api_history():
         """History records."""
         limit = request.args.get("limit", 100, type=int)
+        if limit is None or limit < 1:
+            limit = 100
         if app.db:
             return jsonify(app.db.get_history(limit=limit))
         return jsonify([])
