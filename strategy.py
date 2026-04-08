@@ -124,9 +124,14 @@ class StrategyEngine:
     ) -> float:
         """
         Calculate position size (USDT value per side) based on position mode.
+
+        BOTH exchanges must have sufficient available balance for the arbitrage
+        to work. Position size is limited by the smaller of the two balances.
         """
         if self.position_mode == "fixed":
-            return self.position_value
+            # Use the minimum balance across exchanges, so neither side is underfunded
+            min_balance = min(balances.values()) if balances else 0.0
+            return min(self.position_value, min_balance)
 
         if self.position_mode == "percent":
             total_balance = sum(balances.values())
