@@ -13,6 +13,13 @@ def create_app(monitor_ref=None, config_ref=None, db_ref=None):
     app.config_obj = config_ref
     app.db = db_ref
 
+    @app.after_request
+    def set_security_headers(response):
+        response.headers["X-Content-Type-Options"] = "nosniff"
+        response.headers["X-Frame-Options"] = "DENY"
+        response.headers["X-XSS-Protection"] = "1; mode=block"
+        return response
+
     @app.route("/")
     def index():
         return render_template("index.html")
