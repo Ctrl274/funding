@@ -1,22 +1,25 @@
 """
-Lark notification.
-Sends detailed notifications for every arbitrage attempt.
+Lark Notifier.
+Sends detailed notifications for every arbitrage trade (success or failure).
 """
 import logging
 import httpx
-from typing import Optional
-from strategy import ArbitrageOpportunity
-from executor import OrderResult
+
 
 logger = logging.getLogger(__name__)
 
 
 class Notifier:
-    def __init__(self, webhook: str = "", detail_level: str = "detailed"):
+    """
+    Lark Webhook Notifier.
+    """
+
+    def __init__(self, webhook: str, detail_level: str = "detailed"):
         self.webhook = webhook
         self.detail_level = detail_level
 
     def send(self, message: str) -> bool:
+        """Send Lark message."""
         if not self.webhook:
             logger.warning("Lark webhook not configured")
             return False
@@ -34,7 +37,8 @@ class Notifier:
             logger.error(f"Failed to send Lark notification: {e}")
             return False
 
-    def send_arbitrage_result(self, opportunity: ArbitrageOpportunity, result: OrderResult) -> bool:
+    def send_arbitrage_result(self, opportunity, result) -> bool:
+        """Send arbitrage result notification."""
         msg = self._build_message(
             symbol=opportunity.symbol,
             high_ex=opportunity.high_exchange,
@@ -44,7 +48,7 @@ class Notifier:
         )
         return self.send(msg)
 
-    def _build_message(self, symbol: str, high_ex: str, low_ex: str, rate_diff: float, result: OrderResult) -> str:
+    def _build_message(self, symbol, high_ex, low_ex, rate_diff, result) -> str:
         if self.detail_level == "detailed":
             lines = [
                 f"[Funding Arbitrage] {symbol}",

@@ -1,10 +1,10 @@
 """
-Funding Arbitrage System - Entry Point
+Funding Arbitrage System - Entry Point.
 
 Usage:
-    python main.py                    # Start with UI (http://localhost:8888)
-    python main.py --no-ui            # Background mode, no web UI
-    python main.py --config prod.yaml # Custom config file
+    python main.py                    # Start UI (http://localhost:8888)
+    python main.py --no-ui            # Background only, no Web UI
+    python main.py --config prod.yaml  # Use specific config file
 """
 import argparse
 import logging
@@ -22,6 +22,7 @@ from notifier import Notifier
 from monitor import MonitorLoop
 from db import Database
 
+
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
@@ -30,18 +31,19 @@ logger = logging.getLogger(__name__)
 
 
 def build_adapters(cfg: Config) -> dict:
+    """Build exchange adapters."""
     adapters = {}
     for name, ex_cfg in cfg.exchanges.items():
         if not ex_cfg.enabled:
             continue
-        cls = {
-            "binance": BinanceAdapter,
-            "bybit": BybitAdapter,
-            "bydfi": BydfiAdapter,
-            "mexc": MexcAdapter,
-        }.get(name)
-        if cls:
-            adapters[name] = cls(ex_cfg.api_key, ex_cfg.api_secret, ex_cfg.testnet)
+        if name == "binance":
+            adapters[name] = BinanceAdapter(ex_cfg.api_key, ex_cfg.api_secret, ex_cfg.testnet)
+        elif name == "bybit":
+            adapters[name] = BybitAdapter(ex_cfg.api_key, ex_cfg.api_secret, ex_cfg.testnet)
+        elif name == "bydfi":
+            adapters[name] = BydfiAdapter(ex_cfg.api_key, ex_cfg.api_secret, ex_cfg.testnet)
+        elif name == "mexc":
+            adapters[name] = MexcAdapter(ex_cfg.api_key, ex_cfg.api_secret, ex_cfg.testnet)
     return adapters
 
 
@@ -52,9 +54,11 @@ def main():
     parser.add_argument("--port", type=int, default=8888, help="Web UI port")
     args = parser.parse_args()
 
+    # Load config
     cfg = Config(args.config)
     logger.info("Config loaded")
 
+    # Build components
     adapters = build_adapters(cfg)
     logger.info(f"Adapters: {list(adapters.keys())}")
 
@@ -64,23 +68,28 @@ def main():
         position_mode=cfg.strategy.position_mode,
         position_value=cfg.strategy.position_value,
         position_percent=cfg.strategy.position_percent,
+        leverage=cfg.strategy.leverage,
     )
 
     executor = ExecutionEngine()
+
     notifier = Notifier(
         webhook=cfg.notification.lark_webhook,
         detail_level=cfg.notification.detail_level,
     )
-    db = Database()
 
+    # Build Monitor Loop
+    db = Database()
     monitor = MonitorLoop(
         config=cfg,
         adapters=adapters,
         strategy=strategy,
         executor=executor,
         notifier=notifier,
+        db=db,
     )
 
+    # Web UI
     if not args.no_ui:
         from web.app import create_app
         app = create_app(monitor_ref=monitor, config_ref=cfg, db_ref=db)

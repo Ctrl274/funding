@@ -1,28 +1,23 @@
-# Test fixture config
 exchanges:
   binance:
     enabled: true
-    api_key: "test_key"
-    api_secret: "test_secret"
+    api_key: "testkey"
+    api_secret: "testsecret"
     testnet: false
-
   bybit:
     enabled: true
-    api_key: "test_key"
-    api_secret: "test_secret"
+    api_key: "key2"
+    api_secret: "secret2"
     testnet: false
-
   bydfi:
     enabled: true
-    api_key: "test_key"
-    api_secret: "test_secret"
+    api_key: "key3"
+    api_secret: "secret3"
     testnet: false
-
   mexc:
     enabled: true
-    api_key: "test_key"
-    api_secret: "test_secret"
-
+    api_key: "key4"
+    api_secret: "secret4"
 strategy:
   min_rate_diff: 0.01
   position_mode: "fixed"
@@ -31,16 +26,13 @@ strategy:
   max_concurrent: 3
   pre_settlement_seconds: 600
   partial_fill_action: "cancel_and_stop"
-
 monitor:
   enabled: true
   time_windows:
     - "23:50-00:10"
     - "07:50-08:10"
-    - "15:50-16:10"
   polling_interval: 60
-
 notification:
   enabled: true
-  lark_webhook: "https://open.larksuite.com/test"
+  lark_webhook: "https://test.com"
   detail_level: "detailed"

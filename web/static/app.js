@@ -1,83 +1,115 @@
-// Funding Arbitrage - Frontend JS
+// funding_arbitrage web/static/app.js
 
 function api(url, options) {
-    options = options || {};
-    return fetch(url, options).then(function(r) { return r.json(); });
+    return fetch(url, options || {}).then(function(r) { return r.json(); });
 }
 
 function refreshStatus() {
     api("/api/status").then(function(data) {
-        var el = document.getElementById("monitor-status");
-        if (el) el.textContent = data.monitor_enabled ? "Running" : "Stopped";
-
-        el = document.getElementById("next-settlement");
-        if (el) el.textContent = data.next_settlement ? new Date(data.next_settlement).toLocaleString() : "N/A";
-
-        el = document.getElementById("position-count");
-        if (el) el.textContent = data.current_positions;
+        document.getElementById("monitor-status").textContent =
+            data.monitor_enabled ? "Running" : "Stopped";
+        document.getElementById("next-settlement").textContent =
+            data.next_settlement ? new Date(data.next_settlement).toLocaleString() : "N/A";
+        document.getElementById("position-count").textContent = data.current_positions;
     });
 }
 
 function refreshRates() {
     api("/api/rates").then(function(rows) {
         var tbody = document.getElementById("rates-body");
-        if (!tbody) return;
-
         if (!rows || rows.length === 0) {
-            tbody.innerHTML = "<tr><td colspan=\"6\">No data</td></tr>";
+            tbody.innerHTML = "<tr><td colspan='7'>No data</td></tr>";
             return;
         }
-
-        var exchanges = ["binance", "bybit", "bydfi", "mexc"];
-        tbody.innerHTML = rows.map(function(row) {
+        var allEx = ["binance", "bybit", "bydfi", "mexc"];
+        var html = "";
+        for (var i = 0; i < rows.length; i++) {
+            var row = rows[i];
             var rates = [];
-            exchanges.forEach(function(ex) {
-                var key = ex + "_rate";
-                if (row[key] !== null && row[key] !== undefined) {
-                    rates.push({ ex: ex, val: row[key] });
+            var settlements = [];
+            for (var j = 0; j < allEx.length; j++) {
+                var ex = allEx[j];
+                var rateKey = ex + "_rate";
+                var tsKey = ex + "_next_settlement_ts";
+                if (row[rateKey] !== null && row[rateKey] !== undefined) {
+                    rates.push({ ex: ex, val: row[rateKey] });
+                    var ts = row[tsKey];
+                    if (ts && ts > 0) {
+                        settlements.push(ts);
+                    }
                 }
-            });
+            }
+            if (rates.length < 2) continue;
 
-            if (rates.length < 2) return "";
+            // Filter out pairs with misaligned settlement times (>5min diff)
+            if (settlements.length >= 2) {
+                var maxTs = Math.max.apply(null, settlements);
+                var minTs = Math.min.apply(null, settlements);
+                if ((maxTs - minTs) > 300) continue;
+            }
 
-            var maxRate = -Infinity, minRate = Infinity;
-            rates.forEach(function(r) {
-                if (r.val > maxRate) maxRate = r.val;
-                if (r.val < minRate) minRate = r.val;
-            });
-            var diff = (maxRate - minRate).toFixed(4);
+            var maxRate = Math.max.apply(null, rates.map(function(r) { return r.val; }));
+            var minRate = Math.min.apply(null, rates.map(function(r) { return r.val; }));
+            var diff = maxRate - minRate;
 
-            var cells = exchanges.map(function(ex) {
-                var key = ex + "_rate";
-                var val = row[key];
-                if (val !== null && val !== undefined) {
-                    var cls = val > 0 ? "positive" : "negative";
-                    return "<td class=\"" + cls + "\">" + val.toFixed(4) + "%</td>";
+            var fullCells = "";
+            for (var k = 0; k < allEx.length; k++) {
+                var ex2 = allEx[k];
+                var r = null;
+                for (var m = 0; m < rates.length; m++) {
+                    if (rates[m].ex === ex2) { r = rates[m]; break; }
                 }
-                return "<td>-</td>";
-            }).join("");
+                if (r) {
+                    var cls = r.val > 0 ? "positive" : "negative";
+                    fullCells += "<td class='" + cls + "'>" + r.val.toFixed(4) + "%</td>";
+                } else {
+                    fullCells += "<td>-</td>";
+                }
+            }
 
-            var highlight = parseFloat(diff) >= 0.01 ? "highlight" : "";
-            var diffCls = parseFloat(diff) >= 0.01 ? "positive" : "";
-            return "<tr class=\"" + highlight + "\"><td>" + row.symbol + "</td>" + cells + "<td class=\"" + diffCls + "\">" + diff + "%</td></tr>";
-        }).join("");
+            // Next settlement: use the earliest from available exchanges
+            var settlementStr = "-";
+            if (settlements.length > 0) {
+                var nearestTs = Math.min.apply(null, settlements);
+                var remaining = Math.max(0, Math.floor(nearestTs - Date.now() / 1000));
+                var mm = Math.floor(remaining / 60);
+                var ss = remaining % 60;
+                settlementStr = mm + "m " + ss + "s";
+            }
+
+            var rowClass = diff >= 0.01 ? " class='highlight'" : "";
+            html += "<tr" + rowClass + ">" +
+                "<td>" + row.symbol + "</td>" +
+                fullCells +
+                "<td class='" + (diff >= 0.01 ? "positive" : "") + "'>" + diff.toFixed(4) + "%</td>" +
+                "<td>" + settlementStr + "</td>" +
+                "</tr>";
+        }
+        tbody.innerHTML = html || "<tr><td colspan='7'>No data</td></tr>";
     });
 }
 
 function refreshPositions() {
     api("/api/positions").then(function(positions) {
         var tbody = document.getElementById("positions-body");
-        if (!tbody) return;
-
         if (!positions || positions.length === 0) {
-            tbody.innerHTML = "<tr><td colspan=\"6\">No open positions</td></tr>";
+            tbody.innerHTML = "<tr><td colspan='6'>No open positions</td></tr>";
             return;
         }
-
-        tbody.innerHTML = positions.map(function(p) {
-            var openTime = new Date(p.open_time * 1000).toLocaleString();
-            return "<tr><td>" + p.symbol + "</td><td>" + p.high_exchange + " (" + p.side_a + ")</td><td>" + p.low_exchange + " (" + p.side_b + ")</td><td>" + p.quantity + "</td><td>" + openTime + "</td><td><button class=\"close-btn\" onclick=\"closePosition('" + p.symbol + "')\">Close</button></td></tr>";
-        }).join("");
+        var html = "";
+        for (var i = 0; i < positions.length; i++) {
+            var p = positions[i];
+            var openTime = new Date(p.open_time).toLocaleString();
+            html += "<tr>" +
+                "<td>" + p.symbol + "</td>" +
+                "<td>" + p.high_exchange + " (" + p.side_a + ")</td>" +
+                "<td>" + p.low_exchange + " (" + p.side_b + ")</td>" +
+                "<td>" + p.quantity + "</td>" +
+                "<td>" + openTime + "</td>" +
+                "<td><button onclick=\"closePosition('" + p.symbol + "')\">Close</button></td>" +
+                "</tr>";
+        }
+        tbody.innerHTML = html;
     });
 }
 
@@ -92,40 +124,45 @@ function closePosition(symbol) {
 function refreshHistory() {
     api("/api/history").then(function(history) {
         var tbody = document.getElementById("history-body");
-        if (!tbody) return;
-
         if (!history || history.length === 0) {
-            tbody.innerHTML = "<tr><td colspan=\"6\">No history</td></tr>";
+            tbody.innerHTML = "<tr><td colspan='6'>No history</td></tr>";
             return;
         }
-
-        tbody.innerHTML = history.map(function(h) {
+        var html = "";
+        for (var i = 0; i < history.length; i++) {
+            var h = history[i];
             var profit = h.profit !== null ? "$" + parseFloat(h.profit).toFixed(2) : "-";
-            var profitCls = h.profit > 0 ? "positive" : (h.profit < 0 ? "negative" : "");
-            return "<tr><td>" + h.created_at + "</td><td>" + h.symbol + "</td><td>" + h.high_exchange + "-" + h.low_exchange + "</td><td>" + parseFloat(h.rate_diff).toFixed(4) + "%</td><td>" + h.result + "</td><td class=\"" + profitCls + "\">" + profit + "</td></tr>";
-        }).join("");
+            var profitCls = h.profit > 0 ? "positive" : h.profit < 0 ? "negative" : "";
+            html += "<tr>" +
+                "<td>" + h.created_at + "</td>" +
+                "<td>" + h.symbol + "</td>" +
+                "<td>" + h.high_exchange + "-" + h.low_exchange + "</td>" +
+                "<td>" + parseFloat(h.rate_diff).toFixed(4) + "%</td>" +
+                "<td>" + h.result + "</td>" +
+                "<td class='" + profitCls + "'>" + profit + "</td>" +
+                "</tr>";
+        }
+        tbody.innerHTML = html;
     });
 }
 
 function loadConfig() {
     api("/api/config").then(function(cfg) {
-        if (!cfg) return;
         var setVal = function(id, val) {
             var el = document.getElementById(id);
             if (el) el.value = val;
         };
-        if (cfg.monitor) {
-            var cb = document.getElementById("monitor-enabled");
-            if (cb) cb.checked = cfg.monitor.enabled;
-            setVal("polling-interval", cfg.monitor.polling_interval);
-        }
-        if (cfg.strategy) {
-            setVal("min-rate-diff", cfg.strategy.min_rate_diff);
-            setVal("max-concurrent", cfg.strategy.max_concurrent);
-        }
-        if (cfg.notification) {
-            setVal("lark-webhook", cfg.notification.lark_webhook);
-        }
+        setVal("polling-interval", cfg.monitor ? cfg.monitor.polling_interval : 60);
+        setVal("min-rate-diff", cfg.strategy ? cfg.strategy.min_rate_diff : 0.01);
+        setVal("max-concurrent", cfg.strategy ? cfg.strategy.max_concurrent : 3);
+        setVal("position-value", cfg.strategy ? cfg.strategy.position_value : 1000);
+        setVal("position-percent", cfg.strategy ? cfg.strategy.position_percent : 5);
+        setVal("leverage", cfg.strategy ? cfg.strategy.leverage : 5);
+        var modeEl = document.getElementById("position-mode");
+        if (modeEl && cfg.strategy) modeEl.value = cfg.strategy.position_mode || "fixed";
+        setVal("lark-webhook", cfg.notification ? cfg.notification.lark_webhook : "");
+        var cb = document.getElementById("monitor-enabled");
+        if (cb) cb.checked = cfg.monitor ? cfg.monitor.enabled : false;
     });
 }
 
@@ -135,11 +172,15 @@ function saveConfig(e) {
     var data = {
         monitor: {
             enabled: form.querySelector("#monitor-enabled").checked,
-            polling_interval: parseInt(form.querySelector("#polling-interval").value),
+            polling_interval: parseInt(form.querySelector("#polling-interval").value, 10),
         },
         strategy: {
             min_rate_diff: parseFloat(form.querySelector("#min-rate-diff").value),
-            max_concurrent: parseInt(form.querySelector("#max-concurrent").value),
+            max_concurrent: parseInt(form.querySelector("#max-concurrent").value, 10),
+            position_value: parseFloat(form.querySelector("#position-value").value),
+            position_mode: form.querySelector("#position-mode").value,
+            position_percent: parseFloat(form.querySelector("#position-percent").value),
+            leverage: parseInt(form.querySelector("#leverage").value, 10),
         },
         notification: {
             lark_webhook: form.querySelector("#lark-webhook").value,

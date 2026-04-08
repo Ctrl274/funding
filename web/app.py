@@ -1,19 +1,14 @@
 """
-Flask Web UI backend.
+Flask Web UI Backend.
 Provides REST API for the frontend.
 """
-import math
-import time
-import yaml
 from flask import Flask, jsonify, request, render_template
+from pathlib import Path
 
 
 def create_app(monitor_ref=None, config_ref=None, db_ref=None):
-    app = Flask(
-        __name__,
-        template_folder="templates",
-        static_folder="static",
-    )
+    app = Flask(__name__, template_folder="templates", static_folder="static")
+
     app.monitor = monitor_ref
     app.config_obj = config_ref
     app.db = db_ref
@@ -38,26 +33,35 @@ def create_app(monitor_ref=None, config_ref=None, db_ref=None):
 
     @app.route("/api/status")
     def api_status():
+        """System status."""
         monitor = app.monitor
+        import time
+        import math
         settlement_dt = None
+        settlement_ts = None
         countdown_seconds = None
         if monitor:
             settlement_dt = monitor.get_next_settlement()
             if settlement_dt:
-                countdown_seconds = math.floor(max(0, settlement_dt.timestamp() - time.time()))
+                settlement_ts = settlement_dt.timestamp()
+                countdown_seconds = math.floor(max(0, settlement_ts - time.time()))
+
         return jsonify({
             "monitor_enabled": app.config_obj.monitor.enabled if app.config_obj else True,
             "next_settlement": settlement_dt.isoformat() if settlement_dt else None,
+            "next_settlement_ts": settlement_ts,
             "countdown_seconds": countdown_seconds,
             "current_positions": len(monitor.get_positions()) if monitor else 0,
         })
 
     @app.route("/api/rates")
     def api_rates():
+        """Live funding rates."""
         monitor = app.monitor
         if not monitor:
             return jsonify([])
         all_rates = monitor.get_current_rates()
+        # Flatten to list
         rows = []
         symbols = set()
         for ex_rates in all_rates.values():
@@ -68,62 +72,69 @@ def create_app(monitor_ref=None, config_ref=None, db_ref=None):
                 fr = rates.get(sym)
                 if fr:
                     row[f"{ex}_rate"] = fr.rate_percent
+                    row[f"{ex}_next_settlement_ts"] = fr.next_settlement
                 else:
                     row[f"{ex}_rate"] = None
+                    row[f"{ex}_next_settlement_ts"] = None
             rows.append(row)
         return jsonify(rows)
 
     @app.route("/api/positions")
     def api_positions():
+        """Current positions."""
         monitor = app.monitor
         if not monitor:
             return jsonify([])
         return jsonify(list(monitor.get_positions().values()))
 
-    @app.route("/api/positions/<path:symbol>/close", methods=["POST"])
+    @app.route("/api/positions/<symbol>/close", methods=["POST"])
     def api_close_position(symbol):
+        """Manually close a position."""
         monitor = app.monitor
         if not monitor:
             return jsonify({"error": "monitor not available"}), 500
+        monitor.close_position(symbol)
         return jsonify({"symbol": symbol, "status": "closed"})
 
     @app.route("/api/history")
     def api_history():
-        if not app.db:
-            return jsonify([])
+        """History records."""
         limit = request.args.get("limit", 100, type=int)
-        return jsonify(app.db.get_history(limit=limit))
+        if app.db:
+            return jsonify(app.db.get_history(limit=limit))
+        return jsonify([])
 
     @app.route("/api/config")
     def api_config():
+        """Read config."""
         if not app.config_obj:
             return jsonify({})
-        cfg = app.config_obj._raw.copy()
+        import copy
+        cfg = copy.deepcopy(app.config_obj._raw)
         for ex in cfg.get("exchanges", {}).values():
-            if ex.get("api_key"):
-                ex["api_key"] = "***"
-            if ex.get("api_secret"):
-                ex["api_secret"] = "***"
+            ex["api_key"] = "***" if ex.get("api_key") else ""
+            ex["api_secret"] = "***" if ex.get("api_secret") else ""
         return jsonify(cfg)
 
     @app.route("/api/config", methods=["POST"])
     def api_update_config():
+        """Update config (hot reload). Only overwrites specified fields."""
         if not app.config_obj:
             return jsonify({"error": "config not available"}), 500
         try:
             data = request.get_json()
-            if not isinstance(data, dict):
-                return jsonify({"error": "expected JSON object"}), 400
-            # Only allow updating known top-level keys
-            allowed_keys = {"monitor", "strategy", "notification"}
-            unknown = set(data.keys()) - allowed_keys
-            if unknown:
-                return jsonify({"error": f"unknown keys: {', '.join(unknown)}"}), 400
-            # Merge into existing config (preserves exchanges section)
-            merged = app.config_obj._raw.copy()
-            merged.update(data)
-            with open(app.config_obj._path, "w", encoding="utf-8") as f:
-                yaml.dump(merged, f, allow_unicode=True)
+
+            def deep_update(target, source):
+                for key, value in source.items():
+                    if isinstance(value, dict) and isinstance(target.get(key), dict):
+                        deep_update(target[key], value)
+                    else:
+                        target[key] = value
+
+            deep_update(app.config_obj._raw, data)
+            with open(app.config_obj._config_path, "w", encoding="utf-8") as f:
+                import yaml
+                yaml.dump(app.config_obj._raw, f, allow_unicode=True, default_flow_style=False)
             app.config_obj.reload()
             return jsonify({"status": "ok"})
         except Exception as e:

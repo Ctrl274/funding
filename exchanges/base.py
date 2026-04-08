@@ -119,3 +119,20 @@ class ExchangeAdapter(ABC):
     @abstractmethod
     def get_fee_rate(self, symbol: str) -> Dict[str, float]:
         """Get the trading fee rate. Returns {'maker': float, 'taker': float}."""
+
+    @abstractmethod
+    def get_ticker_price(self, symbol: str) -> Optional[float]:
+        """Get current mark/last price for a symbol. Returns float or None."""
+
+    @abstractmethod
+    def get_max_position(self, symbol: str) -> Optional[float]:
+        """Get maximum position size allowed for a symbol. Returns float or None."""
+
+    @abstractmethod
+    def get_contract_size(self, symbol: str) -> float:
+        """Get contract size (multiplier) for a symbol.
+
+        For exchanges where quantity = coins (Binance, Bybit), returns 1.0.
+        For exchanges where quantity = contracts (MEXC, BYDFi), returns the
+        multiplier (e.g. 0.0001 means 1 contract = 0.0001 coins).
+        """

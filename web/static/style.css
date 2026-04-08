@@ -1,3 +1,4 @@
+/* funding_arbitrage web/static/style.css */
 * { margin: 0; padding: 0; box-sizing: border-box; }
 
 body {
@@ -112,8 +113,7 @@ td.negative { color: #f44336; }
     margin-bottom: 6px;
 }
 
-.form-group input[type="text"],
-.form-group input[type="number"] {
+.form-group input {
     width: 100%;
     max-width: 400px;
     padding: 8px 12px;
@@ -122,11 +122,6 @@ td.negative { color: #f44336; }
     border-radius: 4px;
     color: #fff;
     font-size: 14px;
-}
-
-.form-group input[type="checkbox"] {
-    width: 18px;
-    height: 18px;
 }
 
 button {
@@ -141,10 +136,4 @@ button {
 
 button:hover {
     background: #3d7de8;
-}
-
-button.close-btn {
-    background: #f44336;
-    padding: 4px 12px;
-    font-size: 12px;
 }
