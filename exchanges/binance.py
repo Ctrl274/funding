@@ -81,7 +81,16 @@ class BinanceAdapter(ExchangeAdapter):
         query = "&".join(f"{k}={v}" for k, v in params.items())
         url = f"{base}{endpoint}?{query}"
         resp = requests.get(url, headers=headers, timeout=10)
-        resp.raise_for_status()
+        if not resp.ok:
+            try:
+                err_body = resp.json()
+                code = err_body.get("code", "")
+                msg = err_body.get("msg", resp.text[:200])
+                raise requests.exceptions.HTTPError(
+                    f"{resp.status_code} Error (code={code}): {msg}"
+                )
+            except ValueError:
+                resp.raise_for_status()
         return resp.json()
 
     def _signed_post(self, endpoint: str, params: Optional[Dict] = None, version: str = "v1") -> dict:
@@ -94,7 +103,16 @@ class BinanceAdapter(ExchangeAdapter):
         query = "&".join(f"{k}={v}" for k, v in params.items())
         url = f"{base}{endpoint}?{query}"
         resp = requests.post(url, headers=headers, timeout=10)
-        resp.raise_for_status()
+        if not resp.ok:
+            try:
+                err_body = resp.json()
+                code = err_body.get("code", "")
+                msg = err_body.get("msg", resp.text[:200])
+                raise requests.exceptions.HTTPError(
+                    f"{resp.status_code} Error (code={code}): {msg}"
+                )
+            except ValueError:
+                resp.raise_for_status()
         return resp.json()
 
     # -------------------------------------------------------------------------
@@ -237,7 +255,16 @@ class BinanceAdapter(ExchangeAdapter):
         query = "&".join(f"{k}={v}" for k, v in params.items())
         url = f"{base}{endpoint}?{query}"
         resp = requests.delete(url, headers=headers, timeout=10)
-        resp.raise_for_status()
+        if not resp.ok:
+            try:
+                err_body = resp.json()
+                code = err_body.get("code", "")
+                msg = err_body.get("msg", resp.text[:200])
+                raise requests.exceptions.HTTPError(
+                    f"{resp.status_code} Error (code={code}): {msg}"
+                )
+            except ValueError:
+                resp.raise_for_status()
         return resp.json()
 
     def cancel_order(self, symbol: str, order_id: str) -> bool:
