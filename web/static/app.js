@@ -1,5 +1,10 @@
 // funding_arbitrage web/static/app.js
 
+function escapeHtml(str) {
+    if (str === null || str === undefined) return "";
+    return String(str).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#39;");
+}
+
 function api(url, options) {
     return fetch(url, options || {}).then(function(r) { return r.json(); });
 }
@@ -79,10 +84,10 @@ function refreshRates() {
 
             var rowClass = diff >= 0.01 ? " class='highlight'" : "";
             html += "<tr" + rowClass + ">" +
-                "<td>" + row.symbol + "</td>" +
+                "<td>" + escapeHtml(row.symbol) + "</td>" +
                 fullCells +
                 "<td class='" + (diff >= 0.01 ? "positive" : "") + "'>" + diff.toFixed(4) + "%</td>" +
-                "<td>" + settlementStr + "</td>" +
+                "<td>" + escapeHtml(settlementStr) + "</td>" +
                 "</tr>";
         }
         tbody.innerHTML = html || "<tr><td colspan='7'>No data</td></tr>";
@@ -100,14 +105,22 @@ function refreshPositions() {
         for (var i = 0; i < positions.length; i++) {
             var p = positions[i];
             var openTime = new Date(p.open_time).toLocaleString();
+            var safeSymbol = escapeHtml(p.symbol);
             html += "<tr>" +
-                "<td>" + p.symbol + "</td>" +
-                "<td>" + p.high_exchange + " (" + p.side_a + ")</td>" +
-                "<td>" + p.low_exchange + " (" + p.side_b + ")</td>" +
-                "<td>" + p.quantity + "</td>" +
-                "<td>" + openTime + "</td>" +
-                "<td><button onclick=\"closePosition('" + p.symbol + "')\">Close</button></td>" +
+                "<td>" + safeSymbol + "</td>" +
+                "<td>" + escapeHtml(p.high_exchange) + " (" + escapeHtml(p.side_a) + ")</td>" +
+                "<td>" + escapeHtml(p.low_exchange) + " (" + escapeHtml(p.side_b) + ")</td>" +
+                "<td>" + escapeHtml(p.quantity) + "</td>" +
+                "<td>" + escapeHtml(openTime) + "</td>" +
+                "<td><button data-symbol=\"" + safeSymbol + "\" class=\"close-btn\">Close</button></td>" +
                 "</tr>";
+        }
+        // Attach click handlers after rendering
+        var buttons = tbody.querySelectorAll(".close-btn");
+        for (var b = 0; b < buttons.length; b++) {
+            buttons[b].addEventListener("click", function() {
+                closePosition(this.getAttribute("data-symbol"));
+            });
         }
         tbody.innerHTML = html;
     });
@@ -134,11 +147,11 @@ function refreshHistory() {
             var profit = h.profit !== null ? "$" + parseFloat(h.profit).toFixed(2) : "-";
             var profitCls = h.profit > 0 ? "positive" : h.profit < 0 ? "negative" : "";
             html += "<tr>" +
-                "<td>" + h.created_at + "</td>" +
-                "<td>" + h.symbol + "</td>" +
-                "<td>" + h.high_exchange + "-" + h.low_exchange + "</td>" +
+                "<td>" + escapeHtml(h.created_at) + "</td>" +
+                "<td>" + escapeHtml(h.symbol) + "</td>" +
+                "<td>" + escapeHtml(h.high_exchange) + "-" + escapeHtml(h.low_exchange) + "</td>" +
                 "<td>" + parseFloat(h.rate_diff).toFixed(4) + "%</td>" +
-                "<td>" + h.result + "</td>" +
+                "<td>" + escapeHtml(h.result) + "</td>" +
                 "<td class='" + profitCls + "'>" + profit + "</td>" +
                 "</tr>";
         }
