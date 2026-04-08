@@ -123,6 +123,16 @@ def create_app(monitor_ref=None, config_ref=None, db_ref=None):
             return jsonify({"error": "config not available"}), 500
         try:
             data = request.get_json()
+            if not isinstance(data, dict):
+                return jsonify({"error": "request body must be a JSON object"}), 400
+
+            # Validate: only allow updating known top-level keys with dict values
+            allowed_keys = {"monitor", "strategy", "notification"}
+            for key in data:
+                if key not in allowed_keys:
+                    return jsonify({"error": f"unknown config key: {key}"}), 400
+                if not isinstance(data[key], dict):
+                    return jsonify({"error": f"config key '{key}' must be an object"}), 400
 
             def deep_update(target, source):
                 for key, value in source.items():
@@ -138,6 +148,6 @@ def create_app(monitor_ref=None, config_ref=None, db_ref=None):
             app.config_obj.reload()
             return jsonify({"status": "ok"})
         except Exception as e:
-            return jsonify({"error": str(e)}), 500
+            return jsonify({"error": "Failed to update config"}), 500
 
     return app
