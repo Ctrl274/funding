@@ -8,27 +8,31 @@
 </head>
 <body>
     <nav>
-        <a href="/">Dashboard</a>
-        <a href="/settings">Settings</a>
-        <a href="/positions" class="active">Positions</a>
-        <a href="/history">History</a>
+        <a href="/" data-i18n="nav.dashboard">Dashboard</a>
+        <a href="/settings" data-i18n="nav.settings">Settings</a>
+        <a href="/positions" class="active" data-i18n="nav.positions">Positions</a>
+        <a href="/history" data-i18n="nav.history">History</a>
+        <div class="nav-controls">
+            <button class="nav-toggle" id="theme-toggle" title="Toggle theme">&#9790;</button>
+            <button class="nav-toggle" id="lang-toggle">EN</button>
+        </div>
     </nav>
 
     <div class="container">
-        <h1 class="page-title">Positions</h1>
+        <h1 class="page-title" data-i18n="title.positions">Positions</h1>
 
         <div class="panel">
-            <h2>Current Positions</h2>
+            <h2 data-i18n="current_positions_panel">Current Positions</h2>
             <div class="table-scroll">
                 <table id="positions-table">
                     <thead>
                         <tr>
-                            <th>Symbol</th>
-                            <th>Long Exchange</th>
-                            <th>Short Exchange</th>
-                            <th>Quantity</th>
-                            <th>Open Time</th>
-                            <th>Action</th>
+                            <th data-i18n="th_symbol">Symbol</th>
+                            <th data-i18n="th_long_exchange">Long Exchange</th>
+                            <th data-i18n="th_short_exchange">Short Exchange</th>
+                            <th data-i18n="th_quantity">Quantity</th>
+                            <th data-i18n="th_open_time">Open Time</th>
+                            <th data-i18n="th_action">Action</th>
                         </tr>
                     </thead>
                     <tbody id="positions-body">
@@ -41,8 +45,11 @@
 
     <div id="toast-container"></div>
 
+    <script src="/static/i18n.js"></script>
     <script src="/static/app.js"></script>
     <script>
+        Theme.init();
+        I18N.init();
         refreshPositions();
         setInterval(refreshPositions, 5000);
     </script>

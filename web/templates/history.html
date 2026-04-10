@@ -8,26 +8,30 @@
 </head>
 <body>
     <nav>
-        <a href="/">Dashboard</a>
-        <a href="/settings">Settings</a>
-        <a href="/positions">Positions</a>
-        <a href="/history" class="active">History</a>
+        <a href="/" data-i18n="nav.dashboard">Dashboard</a>
+        <a href="/settings" data-i18n="nav.settings">Settings</a>
+        <a href="/positions" data-i18n="nav.positions">Positions</a>
+        <a href="/history" class="active" data-i18n="nav.history">History</a>
+        <div class="nav-controls">
+            <button class="nav-toggle" id="theme-toggle" title="Toggle theme">&#9790;</button>
+            <button class="nav-toggle" id="lang-toggle">EN</button>
+        </div>
     </nav>
 
     <div class="container">
-        <h1 class="page-title">Trade History</h1>
+        <h1 class="page-title" data-i18n="title.history">Trade History</h1>
 
         <div class="panel">
             <div class="table-scroll">
                 <table id="history-table">
                     <thead>
                         <tr>
-                            <th>Time</th>
-                            <th>Symbol</th>
-                            <th>Pair</th>
-                            <th>Rate Diff</th>
-                            <th>Result</th>
-                            <th>Profit</th>
+                            <th data-i18n="th_time">Time</th>
+                            <th data-i18n="th_symbol">Symbol</th>
+                            <th data-i18n="th_pair">Pair</th>
+                            <th data-i18n="th_rate_diff">Rate Diff</th>
+                            <th data-i18n="th_result">Result</th>
+                            <th data-i18n="th_profit">Profit</th>
                         </tr>
                     </thead>
                     <tbody id="history-body">
@@ -40,8 +44,11 @@
 
     <div id="toast-container"></div>
 
+    <script src="/static/i18n.js"></script>
     <script src="/static/app.js"></script>
     <script>
+        Theme.init();
+        I18N.init();
         refreshHistory();
         setInterval(refreshHistory, 10000);
     </script>

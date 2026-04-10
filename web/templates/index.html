@@ -8,46 +8,50 @@
 </head>
 <body>
     <nav>
-        <a href="/" class="active">Dashboard</a>
-        <a href="/settings">Settings</a>
-        <a href="/positions">Positions</a>
-        <a href="/history">History</a>
+        <a href="/" class="active" data-i18n="nav.dashboard">Dashboard</a>
+        <a href="/settings" data-i18n="nav.settings">Settings</a>
+        <a href="/positions" data-i18n="nav.positions">Positions</a>
+        <a href="/history" data-i18n="nav.history">History</a>
+        <div class="nav-controls">
+            <button class="nav-toggle" id="theme-toggle" title="Toggle theme">&#9790;</button>
+            <button class="nav-toggle" id="lang-toggle">EN</button>
+        </div>
     </nav>
 
     <div class="container">
-        <h1 class="page-title">Dashboard</h1>
+        <h1 class="page-title" data-i18n="title.dashboard">Dashboard</h1>
 
         <div class="panel">
-            <h2>System Status</h2>
+            <h2 data-i18n="system_status">System Status</h2>
             <div class="status-grid">
                 <div class="status-item">
-                    <span class="label">Monitor</span>
+                    <span class="label" data-i18n="monitor">Monitor</span>
                     <span class="value" id="monitor-status"><span class="loading-skeleton">Loading</span></span>
                 </div>
                 <div class="status-item">
-                    <span class="label">Next Settlement</span>
+                    <span class="label" data-i18n="next_settlement">Next Settlement</span>
                     <span class="value" id="next-settlement"><span class="loading-skeleton">Loading</span></span>
                 </div>
                 <div class="status-item">
-                    <span class="label">Current Positions</span>
+                    <span class="label" data-i18n="current_positions">Current Positions</span>
                     <span class="value" id="position-count"><span class="loading-skeleton">Loading</span></span>
                 </div>
             </div>
         </div>
 
         <div class="panel">
-            <h2>Funding Rates (Live)</h2>
+            <h2 data-i18n="funding_rates">Funding Rates (Live)</h2>
             <div class="table-scroll">
                 <table id="rates-table">
                     <thead>
                         <tr>
-                            <th>Symbol</th>
-                            <th>Binance</th>
-                            <th>Bybit</th>
-                            <th>BYDFi</th>
-                            <th>MEXC</th>
-                            <th>Max Diff</th>
-                            <th>Next Settlement</th>
+                            <th data-i18n="th_symbol">Symbol</th>
+                            <th data-i18n="th_binance">Binance</th>
+                            <th data-i18n="th_bybit">Bybit</th>
+                            <th data-i18n="th_bydfi">BYDFi</th>
+                            <th data-i18n="th_mexc">MEXC</th>
+                            <th data-i18n="th_max_diff">Max Diff</th>
+                            <th data-i18n="th_next_settlement">Next Settlement</th>
                         </tr>
                     </thead>
                     <tbody id="rates-body">
@@ -60,8 +64,11 @@
 
     <div id="toast-container"></div>
 
+    <script src="/static/i18n.js"></script>
     <script src="/static/app.js"></script>
     <script>
+        Theme.init();
+        I18N.init();
         refreshStatus();
         refreshRates();
         setInterval(refreshRates, 5000);

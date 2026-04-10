@@ -1,64 +1,157 @@
 /* funding_arbitrage web/static/style.css */
+
+/* === CSS Custom Properties (Design Tokens) === */
+:root {
+    --bg-body: #0f1117;
+    --bg-surface: #1a1d27;
+    --bg-inset: #0f1117;
+    --border: #2a2d3a;
+    --border-hover: #3a3d4a;
+    --text-primary: #fff;
+    --text-secondary: #e0e0e0;
+    --text-muted: #888;
+    --text-dim: #666;
+    --accent: #4f8fff;
+    --accent-hover: #3d7de8;
+    --accent-bg: rgba(79, 143, 255, 0.1);
+    --positive: #4caf50;
+    --negative: #f44336;
+    --toast-success-bg: #2e7d32;
+    --toast-success-border: #4caf50;
+    --toast-error-bg: #c62828;
+    --toast-error-border: #f44336;
+    --skeleton-from: #2a2d3a;
+    --skeleton-via: #333648;
+    --skeleton-to: #2a2d3a;
+    --input-focus-shadow: rgba(79, 143, 255, 0.2);
+    --invalid-focus-shadow: rgba(244, 67, 54, 0.2);
+    --close-btn-hover-bg: rgba(244, 67, 54, 0.1);
+    --shadow-1: rgba(0, 0, 0, 0.3);
+}
+
+[data-theme="light"] {
+    --bg-body: #f5f6fa;
+    --bg-surface: #fff;
+    --bg-inset: #f0f1f5;
+    --border: #e0e2e8;
+    --border-hover: #c8cad2;
+    --text-primary: #1a1d27;
+    --text-secondary: #333;
+    --text-muted: #666;
+    --text-dim: #999;
+    --accent: #2d6fd6;
+    --accent-hover: #1f5bb5;
+    --accent-bg: rgba(45, 111, 214, 0.08);
+    --positive: #2e7d32;
+    --negative: #c62828;
+    --toast-success-bg: #e8f5e9;
+    --toast-success-border: #4caf50;
+    --toast-error-bg: #ffebee;
+    --toast-error-border: #f44336;
+    --skeleton-from: #e0e2e8;
+    --skeleton-via: #eceef2;
+    --skeleton-to: #e0e2e8;
+    --input-focus-shadow: rgba(45, 111, 214, 0.15);
+    --invalid-focus-shadow: rgba(198, 40, 40, 0.15);
+    --close-btn-hover-bg: rgba(198, 40, 40, 0.06);
+    --shadow-1: rgba(0, 0, 0, 0.06);
+}
+
+/* === Base === */
 * { margin: 0; padding: 0; box-sizing: border-box; }
 
 body {
     font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-    background: #0f1117;
-    color: #e0e0e0;
+    background: var(--bg-body);
+    color: var(--text-secondary);
     line-height: 1.6;
+    transition: background 0.2s ease-out, color 0.2s ease-out;
 }
 
-/* FINDING-001/009: Page title */
-h1.page-title {
-    font-size: 20px;
-    font-weight: 600;
-    color: #fff;
-    margin-bottom: 20px;
-}
-
+/* === Nav === */
 nav {
-    background: #1a1d27;
+    background: var(--bg-surface);
     padding: 0 24px;
     display: flex;
     gap: 24px;
     align-items: center;
     height: 48px;
-    border-bottom: 1px solid #2a2d3a;
+    border-bottom: 1px solid var(--border);
+    transition: background 0.2s ease-out, border-color 0.2s ease-out;
 }
 
 nav a {
-    color: #888;
+    color: var(--text-muted);
     text-decoration: none;
     font-size: 14px;
     padding: 14px 0;
+    transition: color 0.15s ease-out;
 }
 
 nav a:hover, nav a.active {
-    color: #fff;
-    border-bottom: 2px solid #4f8fff;
+    color: var(--text-primary);
+    border-bottom: 2px solid var(--accent);
 }
 
+.nav-controls {
+    margin-left: auto;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.nav-toggle {
+    background: transparent;
+    border: 1px solid var(--border);
+    color: var(--text-muted);
+    padding: 4px 10px;
+    border-radius: 4px;
+    font-size: 12px;
+    cursor: pointer;
+    transition: color 0.15s, border-color 0.15s, background 0.15s;
+    line-height: 1;
+    height: 28px;
+}
+
+.nav-toggle:hover {
+    color: var(--text-primary);
+    border-color: var(--border-hover);
+    background: var(--accent-bg);
+}
+
+/* === Page Title === */
+h1.page-title {
+    font-size: 20px;
+    font-weight: 600;
+    color: var(--text-primary);
+    margin-bottom: 20px;
+}
+
+/* === Container === */
 .container {
     padding: 24px;
     max-width: 1200px;
     margin: 0 auto;
 }
 
+/* === Panel === */
 .panel {
-    background: #1a1d27;
-    border: 1px solid #2a2d3a;
+    background: var(--bg-surface);
+    border: 1px solid var(--border);
     border-radius: 8px;
     padding: 20px;
     margin-bottom: 20px;
+    transition: background 0.2s ease-out, border-color 0.2s ease-out;
 }
 
 .panel h2 {
     font-size: 16px;
     font-weight: 600;
     margin-bottom: 16px;
-    color: #fff;
+    color: var(--text-primary);
 }
 
+/* === Status Grid === */
 .status-grid {
     display: grid;
     grid-template-columns: repeat(3, 1fr);
@@ -66,29 +159,29 @@ nav a:hover, nav a.active {
 }
 
 .status-item {
-    background: #0f1117;
+    background: var(--bg-inset);
     padding: 12px 16px;
     border-radius: 6px;
-    border: 1px solid #2a2d3a;
+    border: 1px solid var(--border);
 }
 
 .status-item .label {
     display: block;
     font-size: 12px;
-    color: #666;
+    color: var(--text-dim);
     margin-bottom: 4px;
 }
 
 .status-item .value {
     font-size: 18px;
     font-weight: 600;
-    color: #4f8fff;
+    color: var(--accent);
 }
 
-/* FINDING-002: Loading skeleton */
+/* === Loading Skeleton === */
 .loading-skeleton {
     display: inline-block;
-    background: linear-gradient(90deg, #2a2d3a 25%, #333648 50%, #2a2d3a 75%);
+    background: linear-gradient(90deg, var(--skeleton-from) 25%, var(--skeleton-via) 50%, var(--skeleton-to) 75%);
     background-size: 200% 100%;
     animation: skeleton-shimmer 1.5s ease-in-out infinite;
     border-radius: 4px;
@@ -101,31 +194,25 @@ nav a:hover, nav a.active {
     100% { background-position: -200% 0; }
 }
 
-/* Respect reduced motion */
 @media (prefers-reduced-motion: reduce) {
     .loading-skeleton {
         animation: none;
-        background: #2a2d3a;
+        background: var(--skeleton-from);
     }
 }
 
-/* Empty states */
+/* === Empty States === */
 .empty-state {
     text-align: center;
     padding: 32px 16px;
-    color: #666;
-}
-
-.empty-state .empty-icon {
-    font-size: 28px;
-    margin-bottom: 8px;
-    opacity: 0.5;
+    color: var(--text-dim);
 }
 
 .empty-state .empty-text {
     font-size: 14px;
 }
 
+/* === Table === */
 table {
     width: 100%;
     border-collapse: collapse;
@@ -135,26 +222,27 @@ th, td {
     padding: 10px 12px;
     text-align: left;
     font-size: 13px;
-    border-bottom: 1px solid #2a2d3a;
+    border-bottom: 1px solid var(--border);
 }
 
 th {
-    color: #666;
+    color: var(--text-dim);
     font-weight: 500;
 }
 
-td.positive { color: #4caf50; }
-td.negative { color: #f44336; }
+td.positive { color: var(--positive); }
+td.negative { color: var(--negative); }
 
 .highlight {
-    background: rgba(79, 143, 255, 0.1);
+    background: var(--accent-bg);
 }
 
 .highlight td:first-child {
-    border-left: 3px solid #4f8fff;
+    border-left: 3px solid var(--accent);
     padding-left: 9px;
 }
 
+/* === Forms === */
 .form-group {
     margin-bottom: 16px;
 }
@@ -162,45 +250,43 @@ td.negative { color: #f44336; }
 .form-group label {
     display: block;
     font-size: 13px;
-    color: #888;
+    color: var(--text-muted);
     margin-bottom: 4px;
 }
 
-/* FINDING-011/012/015: Input styles with focus, validation, and accessibility */
 .form-group input,
 .form-group select {
     width: 100%;
     max-width: 400px;
     padding: 8px 12px;
-    background: #0f1117;
-    border: 1px solid #2a2d3a;
+    background: var(--bg-inset);
+    border: 1px solid var(--border);
     border-radius: 4px;
-    color: #fff;
+    color: var(--text-primary);
     font-size: 14px;
-    transition: border-color 0.15s ease-out;
+    transition: border-color 0.15s ease-out, background 0.2s ease-out, color 0.2s ease-out;
 }
 
 .form-group input:focus,
 .form-group select:focus {
     outline: none;
-    border-color: #4f8fff;
-    box-shadow: 0 0 0 2px rgba(79, 143, 255, 0.2);
+    border-color: var(--accent);
+    box-shadow: 0 0 0 2px var(--input-focus-shadow);
 }
 
 .form-group input:invalid:not(:placeholder-shown) {
-    border-color: #f44336;
+    border-color: var(--negative);
 }
 
 .form-group input:invalid:not(:placeholder-shown):focus {
-    box-shadow: 0 0 0 2px rgba(244, 67, 54, 0.2);
+    box-shadow: 0 0 0 2px var(--invalid-focus-shadow);
 }
 
-/* Checkbox alignment */
 .form-group input[type="checkbox"] {
     width: 16px;
     height: 16px;
     max-width: none;
-    accent-color: #4f8fff;
+    accent-color: var(--accent);
     margin-right: 8px;
     vertical-align: middle;
 }
@@ -213,8 +299,9 @@ td.negative { color: #f44336; }
     padding-right: 32px;
 }
 
+/* === Buttons === */
 button {
-    background: #4f8fff;
+    background: var(--accent);
     color: #fff;
     border: none;
     padding: 8px 20px;
@@ -225,34 +312,32 @@ button {
 }
 
 button:hover {
-    background: #3d7de8;
+    background: var(--accent-hover);
 }
 
 button:focus-visible {
-    outline: 2px solid #4f8fff;
+    outline: 2px solid var(--accent);
     outline-offset: 2px;
 }
 
-/* FINDING-018: Button loading state */
 button.loading {
     opacity: 0.6;
     pointer-events: none;
 }
 
-/* Close button variant */
 button.close-btn {
     background: transparent;
-    color: #f44336;
-    border: 1px solid #f44336;
+    color: var(--negative);
+    border: 1px solid var(--negative);
     padding: 4px 12px;
     font-size: 12px;
 }
 
 button.close-btn:hover {
-    background: rgba(244, 67, 54, 0.1);
+    background: var(--close-btn-hover-bg);
 }
 
-/* FINDING-013: Toast notification */
+/* === Toast === */
 .toast {
     position: fixed;
     bottom: 24px;
@@ -260,7 +345,6 @@ button.close-btn:hover {
     padding: 12px 20px;
     border-radius: 6px;
     font-size: 14px;
-    color: #fff;
     opacity: 0;
     transform: translateY(8px);
     transition: opacity 0.2s ease-out, transform 0.2s ease-out;
@@ -273,26 +357,36 @@ button.close-btn:hover {
 }
 
 .toast.success {
-    background: #2e7d32;
-    border: 1px solid #4caf50;
+    background: var(--toast-success-bg);
+    border: 1px solid var(--toast-success-border);
+    color: #fff;
+}
+
+[data-theme="light"] .toast.success {
+    color: #2e7d32;
 }
 
 .toast.error {
-    background: #c62828;
-    border: 1px solid #f44336;
+    background: var(--toast-error-bg);
+    border: 1px solid var(--toast-error-border);
+    color: #fff;
 }
 
-/* Table wrapper for horizontal scroll on mobile */
+[data-theme="light"] .toast.error {
+    color: #c62828;
+}
+
+/* === Table Scroll === */
 .table-scroll {
     overflow-x: auto;
     -webkit-overflow-scrolling: touch;
 }
 
-/* FINDING-003/005: Responsive breakpoints */
+/* === Responsive === */
 @media (max-width: 768px) {
     nav {
         padding: 0 16px;
-        gap: 16px;
+        gap: 12px;
         overflow-x: auto;
     }
 

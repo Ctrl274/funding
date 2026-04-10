@@ -1,5 +1,28 @@
 // funding_arbitrage web/static/app.js
 
+/* === Theme Module === */
+var Theme = {
+    _theme: "dark",
+    init: function() {
+        var saved = localStorage.getItem("theme");
+        Theme._theme = (saved === "light" || saved === "dark") ? saved : "dark";
+        Theme.apply();
+        var btn = document.getElementById("theme-toggle");
+        if (btn) btn.addEventListener("click", Theme.toggle);
+    },
+    apply: function() {
+        document.documentElement.setAttribute("data-theme", Theme._theme);
+        var btn = document.getElementById("theme-toggle");
+        if (btn) btn.innerHTML = Theme._theme === "dark" ? "&#9788;" : "&#9790;";
+    },
+    toggle: function() {
+        Theme._theme = Theme._theme === "dark" ? "light" : "dark";
+        localStorage.setItem("theme", Theme._theme);
+        Theme.apply();
+    }
+};
+
+/* === Utilities === */
 function escapeHtml(str) {
     if (str === null || str === undefined) return "";
     return String(str).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#39;");
@@ -22,7 +45,6 @@ function showToast(message, type) {
     toast.className = "toast " + (type || "success");
     toast.textContent = message;
     container.appendChild(toast);
-    // Trigger reflow for animation
     toast.offsetHeight;
     toast.classList.add("show");
     setTimeout(function() {
@@ -31,13 +53,20 @@ function showToast(message, type) {
     }, 3000);
 }
 
+/* === Language toggle init === */
+function initLangToggle() {
+    var btn = document.getElementById("lang-toggle");
+    if (btn) btn.addEventListener("click", I18N.toggleLang);
+}
+
+/* === Dashboard === */
 function refreshStatus() {
     api("/api/status").then(function(data) {
         if (!data) return;
         document.getElementById("monitor-status").textContent =
-            data.monitor_enabled ? "Running" : "Stopped";
+            data.monitor_enabled ? I18N.t("running") : I18N.t("stopped");
         document.getElementById("next-settlement").textContent =
-            data.next_settlement ? new Date(data.next_settlement).toLocaleString() : "N/A";
+            data.next_settlement ? new Date(data.next_settlement).toLocaleString() : I18N.t("n_a");
         document.getElementById("position-count").textContent = data.current_positions;
     });
 }
@@ -45,8 +74,9 @@ function refreshStatus() {
 function refreshRates() {
     api("/api/rates").then(function(rows) {
         var tbody = document.getElementById("rates-body");
+        if (!tbody) return;
         if (!rows || rows.length === 0) {
-            tbody.innerHTML = "<tr><td colspan='7'><div class='empty-state'><div class='empty-text'>No funding rate data available</div></div></td></tr>";
+            tbody.innerHTML = "<tr><td colspan='7'><div class='empty-state'><div class='empty-text'>" + escapeHtml(I18N.t("empty_rates")) + "</div></div></td></tr>";
             return;
         }
         var allEx = ["binance", "bybit", "bydfi", "mexc"];
@@ -69,7 +99,6 @@ function refreshRates() {
             }
             if (rates.length < 2) continue;
 
-            // Filter out pairs with misaligned settlement times (>5min diff)
             if (settlements.length >= 2) {
                 var maxTs = Math.max.apply(null, settlements);
                 var minTs = Math.min.apply(null, settlements);
@@ -95,7 +124,6 @@ function refreshRates() {
                 }
             }
 
-            // Next settlement: use the earliest from available exchanges
             var settlementStr = "-";
             if (settlements.length > 0) {
                 var nearestTs = Math.min.apply(null, settlements);
@@ -113,15 +141,17 @@ function refreshRates() {
                 "<td>" + escapeHtml(settlementStr) + "</td>" +
                 "</tr>";
         }
-        tbody.innerHTML = html || "<tr><td colspan='7'><div class='empty-state'><div class='empty-text'>No pairs match the current filter criteria</div></div></td></tr>";
+        tbody.innerHTML = html || "<tr><td colspan='7'><div class='empty-state'><div class='empty-text'>" + escapeHtml(I18N.t("empty_rates_filter")) + "</div></div></td></tr>";
     });
 }
 
+/* === Positions === */
 function refreshPositions() {
     api("/api/positions").then(function(positions) {
         var tbody = document.getElementById("positions-body");
+        if (!tbody) return;
         if (!positions || positions.length === 0) {
-            tbody.innerHTML = "<tr><td colspan='6'><div class='empty-state'><div class='empty-text'>No open positions</div></div></td></tr>";
+            tbody.innerHTML = "<tr><td colspan='6'><div class='empty-state'><div class='empty-text'>" + escapeHtml(I18N.t("empty_positions")) + "</div></div></td></tr>";
             return;
         }
         var html = "";
@@ -135,11 +165,10 @@ function refreshPositions() {
                 "<td>" + escapeHtml(p.low_exchange) + " (" + escapeHtml(p.side_b) + ")</td>" +
                 "<td>" + escapeHtml(p.quantity) + "</td>" +
                 "<td>" + escapeHtml(openTime) + "</td>" +
-                "<td><button data-symbol=\"" + safeSymbol + "\" class=\"close-btn\">Close</button></td>" +
+                "<td><button data-symbol=\"" + safeSymbol + "\" class=\"close-btn\">" + escapeHtml(I18N.t("btn_close")) + "</button></td>" +
                 "</tr>";
         }
         tbody.innerHTML = html;
-        // Attach click handlers after rendering
         var buttons = tbody.querySelectorAll(".close-btn");
         for (var b = 0; b < buttons.length; b++) {
             buttons[b].addEventListener("click", function() {
@@ -150,36 +179,34 @@ function refreshPositions() {
 }
 
 function closePosition(symbol, btn) {
-    if (!confirm("Close " + symbol + " position?")) return;
+    var msg = I18N.t("confirm_close", { symbol: symbol });
+    if (!confirm(msg)) return;
     if (btn) {
         btn.classList.add("loading");
-        btn.textContent = "Closing...";
+        btn.textContent = I18N.t("btn_closing");
         btn.disabled = true;
     }
     api("/api/positions/" + symbol + "/close", { method: "POST" }).then(function() {
         refreshPositions();
         refreshStatus();
-        if (btn) {
-            btn.classList.remove("loading");
-            btn.textContent = "Close";
-            btn.disabled = false;
-        }
-        showToast("Position " + symbol + " closed", "success");
+        showToast(I18N.t("toast_position_closed", { symbol: symbol }), "success");
     }).catch(function() {
         if (btn) {
             btn.classList.remove("loading");
-            btn.textContent = "Close";
+            btn.textContent = I18N.t("btn_close");
             btn.disabled = false;
         }
-        showToast("Failed to close position " + symbol, "error");
+        showToast(I18N.t("toast_close_failed", { symbol: symbol }), "error");
     });
 }
 
+/* === History === */
 function refreshHistory() {
     api("/api/history").then(function(history) {
         var tbody = document.getElementById("history-body");
+        if (!tbody) return;
         if (!history || history.length === 0) {
-            tbody.innerHTML = "<tr><td colspan='6'><div class='empty-state'><div class='empty-text'>No trade history yet</div></div></td></tr>";
+            tbody.innerHTML = "<tr><td colspan='6'><div class='empty-state'><div class='empty-text'>" + escapeHtml(I18N.t("empty_history")) + "</div></div></td></tr>";
             return;
         }
         var html = "";
@@ -200,6 +227,7 @@ function refreshHistory() {
     });
 }
 
+/* === Settings === */
 function loadConfig() {
     api("/api/config").then(function(cfg) {
         if (!cfg) return;
@@ -247,8 +275,8 @@ function saveConfig(e) {
 
     function handleResult(r) {
         if (btn) { btn.classList.remove("loading"); btn.disabled = false; }
-        if (r && r.status === "ok") showToast("Config saved and reloaded", "success");
-        else showToast("Error saving config", "error");
+        if (r && r.status === "ok") showToast(I18N.t("toast_config_saved"), "success");
+        else showToast(I18N.t("toast_config_error"), "error");
     }
 
     api("/api/config", {
@@ -259,3 +287,6 @@ function saveConfig(e) {
         handleResult(null);
     });
 }
+
+/* === Init language toggle on every page === */
+document.addEventListener("DOMContentLoaded", initLangToggle);

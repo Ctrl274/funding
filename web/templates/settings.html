@@ -8,66 +8,73 @@
 </head>
 <body>
     <nav>
-        <a href="/">Dashboard</a>
-        <a href="/settings" class="active">Settings</a>
-        <a href="/positions">Positions</a>
-        <a href="/history">History</a>
+        <a href="/" data-i18n="nav.dashboard">Dashboard</a>
+        <a href="/settings" class="active" data-i18n="nav.settings">Settings</a>
+        <a href="/positions" data-i18n="nav.positions">Positions</a>
+        <a href="/history" data-i18n="nav.history">History</a>
+        <div class="nav-controls">
+            <button class="nav-toggle" id="theme-toggle" title="Toggle theme">&#9790;</button>
+            <button class="nav-toggle" id="lang-toggle">EN</button>
+        </div>
     </nav>
 
     <div class="container">
-        <h1 class="page-title">Settings</h1>
+        <h1 class="page-title" data-i18n="title.settings">Settings</h1>
 
         <div class="panel">
-            <h2>Monitor Settings</h2>
+            <h2 data-i18n="monitor_settings">Monitor Settings</h2>
             <form id="settings-form" novalidate>
                 <div class="form-group">
-                    <label for="monitor-enabled">Monitor Enabled</label>
+                    <label for="monitor-enabled" data-i18n="monitor_enabled">Monitor Enabled</label>
                     <input type="checkbox" name="monitor.enabled" id="monitor-enabled">
                 </div>
                 <div class="form-group">
-                    <label for="polling-interval">Polling Interval (seconds)</label>
+                    <label for="polling-interval" data-i18n="polling_interval">Polling Interval (seconds)</label>
                     <input type="number" name="monitor.polling_interval" id="polling-interval" value="60" min="5" max="3600" required>
                 </div>
                 <div class="form-group">
-                    <label for="min-rate-diff">Min Rate Diff (%)</label>
+                    <label for="min-rate-diff" data-i18n="min_rate_diff">Min Rate Diff (%)</label>
                     <input type="number" step="0.001" name="strategy.min_rate_diff" id="min-rate-diff" value="0.01" min="0" max="1" required>
                 </div>
                 <div class="form-group">
-                    <label for="max-concurrent">Max Concurrent</label>
+                    <label for="max-concurrent" data-i18n="max_concurrent">Max Concurrent</label>
                     <input type="number" name="strategy.max_concurrent" id="max-concurrent" value="3" min="1" max="20" required>
                 </div>
                 <div class="form-group">
-                    <label for="position-value">Position Value (USDT per side)</label>
+                    <label for="position-value" data-i18n="position_value">Position Value (USDT per side)</label>
                     <input type="number" name="strategy.position_value" id="position-value" value="1000" min="10" required>
                 </div>
                 <div class="form-group">
-                    <label for="position-mode">Position Mode</label>
+                    <label for="position-mode" data-i18n="position_mode">Position Mode</label>
                     <select name="strategy.position_mode" id="position-mode">
-                        <option value="fixed">Fixed</option>
-                        <option value="percent">Percent</option>
+                        <option value="fixed" data-i18n="mode_fixed">Fixed</option>
+                        <option value="percent" data-i18n="mode_percent">Percent</option>
                     </select>
                 </div>
                 <div class="form-group">
-                    <label for="position-percent">Position Percent (%)</label>
+                    <label for="position-percent" data-i18n="position_percent">Position Percent (%)</label>
                     <input type="number" name="strategy.position_percent" id="position-percent" value="5" min="0.1" max="100" step="0.1" required>
                 </div>
                 <div class="form-group">
-                    <label for="leverage">Leverage</label>
+                    <label for="leverage" data-i18n="leverage">Leverage</label>
                     <input type="number" name="strategy.leverage" id="leverage" value="5" min="1" max="125" required>
                 </div>
                 <div class="form-group">
-                    <label for="lark-webhook">Lark Webhook URL</label>
+                    <label for="lark-webhook" data-i18n="lark_webhook">Lark Webhook URL</label>
                     <input type="url" name="notification.lark_webhook" id="lark-webhook" placeholder="https://...">
                 </div>
-                <button type="submit" id="save-btn">Save &amp; Reload</button>
+                <button type="submit" id="save-btn" data-i18n="btn_save_reload">Save &amp; Reload</button>
             </form>
         </div>
     </div>
 
     <div id="toast-container"></div>
 
+    <script src="/static/i18n.js"></script>
     <script src="/static/app.js"></script>
     <script>
+        Theme.init();
+        I18N.init();
         loadConfig();
         document.getElementById("settings-form").addEventListener("submit", saveConfig);
     </script>
