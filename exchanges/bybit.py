@@ -111,6 +111,28 @@ class BybitAdapter(ExchangeAdapter):
             logger.warning(f"{self.NAME} order failed: {symbol} {side} {quantity} @ {price} {e}")
             return None
 
+    def place_market_order(
+        self,
+        symbol: str,
+        side: str,
+        quantity: float,
+    ) -> Optional[str]:
+        import logging
+        logger = logging.getLogger(__name__)
+        try:
+            order = self._client.create_order(
+                symbol=self._normalize_symbol(symbol),
+                type="market",
+                side=side.lower(),
+                amount=quantity,
+            )
+            order_id = order.get("id")
+            logger.info(f"{self.NAME} market order placed: {symbol} {side} {quantity}, orderId={order_id}")
+            return order_id
+        except Exception as e:
+            logger.warning(f"{self.NAME} market order failed: {symbol} {side} {quantity} {e}")
+            return None
+
     def cancel_order(self, symbol: str, order_id: str) -> bool:
         try:
             self._client.cancel_order(order_id, self._normalize_symbol(symbol))

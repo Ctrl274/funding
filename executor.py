@@ -1,6 +1,6 @@
 """
 Execution Engine.
-Handles FOK limit orders, fill listening, and partial fill handling.
+Handles FOK limit orders, market orders, fill listening, and partial fill handling.
 """
 import time
 from dataclasses import dataclass, field
@@ -25,9 +25,10 @@ class ExecutionEngine:
     Execution Engine.
 
     Core flow:
-    1. Send FOK limit orders to both exchanges simultaneously
-    2. Poll for fill status (N second timeout)
-    3. Both filled -> success
+    1. Send orders to both exchanges simultaneously
+    2. Market orders: assume filled immediately, verify via get_order_status
+    3. Limit orders (IOC/FOK): poll for fill status (N second timeout)
+    4. Both filled -> success
        One side not filled -> cancel other side + stop loss
        Both failed -> failure
     """
@@ -46,11 +47,104 @@ class ExecutionEngine:
         quantity: int,
         price_a: float,
         price_b: float,
+        order_type: str = "limit",
     ) -> OrderResult:
         """
         Execute arbitrage.
+        order_type: "limit" (IOC/FOK) or "market"
         Returns OrderResult.
         """
+        if order_type == "market":
+            return self._execute_market(symbol, adapter_a, adapter_b,
+                                        side_a, side_b, quantity, price_a, price_b)
+        return self._execute_limit(symbol, adapter_a, adapter_b,
+                                   side_a, side_b, quantity, price_a, price_b)
+
+    def _execute_market(
+        self,
+        symbol: str,
+        adapter_a,
+        adapter_b,
+        side_a: str,
+        side_b: str,
+        quantity: int,
+        price_a: float,
+        price_b: float,
+    ) -> OrderResult:
+        """Execute arbitrage using market orders."""
+        order_a_id = adapter_a.place_market_order(symbol, side_a, quantity)
+        order_b_id = adapter_b.place_market_order(symbol, side_b, quantity)
+
+        if order_a_id is None:
+            if order_b_id:
+                adapter_b.cancel_order(symbol, order_b_id)
+            return OrderResult(status="failed", error_a="order_a_submit_failed")
+
+        if order_b_id is None:
+            adapter_a.cancel_order(symbol, order_a_id)
+            return OrderResult(
+                status="failed",
+                order_a_id=order_a_id,
+                error_b="order_b_submit_failed",
+            )
+
+        # Market orders fill instantly, but verify status briefly
+        time.sleep(0.5)
+
+        status_a = adapter_a.get_order_status(symbol, order_a_id)
+        status_b = adapter_b.get_order_status(symbol, order_b_id)
+
+        filled_a = status_a == "filled"
+        filled_b = status_b == "filled"
+
+        if filled_a and filled_b:
+            return OrderResult(
+                status="filled",
+                order_a_id=order_a_id,
+                order_b_id=order_b_id,
+                fill_price_a=price_a,
+                fill_price_b=price_b,
+            )
+
+        # Handle partial fills — cancel the filled side if the other failed
+        if filled_a and not filled_b:
+            adapter_a.cancel_order(symbol, order_a_id)
+            return OrderResult(
+                status="partial_fill",
+                order_a_id=order_a_id,
+                order_b_id=order_b_id,
+                error_b=f"status={status_b}",
+            )
+        if filled_b and not filled_a:
+            adapter_b.cancel_order(symbol, order_b_id)
+            return OrderResult(
+                status="partial_fill",
+                order_a_id=order_a_id,
+                order_b_id=order_b_id,
+                error_a=f"status={status_a}",
+            )
+
+        # Both failed
+        return OrderResult(
+            status="failed",
+            order_a_id=order_a_id,
+            order_b_id=order_b_id,
+            error_a=f"status={status_a}",
+            error_b=f"status={status_b}",
+        )
+
+    def _execute_limit(
+        self,
+        symbol: str,
+        adapter_a,
+        adapter_b,
+        side_a: str,
+        side_b: str,
+        quantity: int,
+        price_a: float,
+        price_b: float,
+    ) -> OrderResult:
+        """Execute arbitrage using FOK limit orders."""
         order_a_id = adapter_a.place_fok_order(symbol, side_a, quantity, price_a)
         order_b_id = adapter_b.place_fok_order(symbol, side_b, quantity, price_b)
 

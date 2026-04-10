@@ -246,6 +246,40 @@ class BinanceAdapter(ExchangeAdapter):
             )
             return None
 
+    def place_market_order(
+        self,
+        symbol: str,
+        side: str,
+        quantity: float,
+    ) -> Optional[str]:
+        """Place a market order."""
+        import logging
+        logger = logging.getLogger(__name__)
+
+        try:
+            qty_precision, _ = self._get_symbol_precision(symbol)
+            qty_str = f"{int(quantity)}" if qty_precision == 0 else f"{quantity:.{qty_precision}f}"
+
+            data = self._signed_post(
+                "/order",
+                params={
+                    "symbol": self._binance_symbol(symbol),
+                    "side": side.upper(),
+                    "type": "MARKET",
+                    "quantity": qty_str,
+                },
+            )
+            order_id = str(data.get("orderId"))
+            logger.info(
+                f"binance market order placed: {symbol} {side} {quantity}, orderId={order_id}"
+            )
+            return order_id
+        except Exception as e:
+            logger.warning(
+                f"binance market order failed: {symbol} {side} {quantity} {e}"
+            )
+            return None
+
     def _signed_delete(self, endpoint: str, params: Optional[Dict] = None, version: str = "v1") -> dict:
         """Make a signed DELETE request."""
         params = params or {}

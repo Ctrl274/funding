@@ -162,6 +162,41 @@ class BydfiAdapter(ExchangeAdapter):
         )
         return None
 
+    def place_market_order(
+        self,
+        symbol: str,
+        side: str,
+        quantity: float,
+    ) -> Optional[str]:
+        """POST /swap/order/place — market order"""
+        import logging
+        logger = logging.getLogger(__name__)
+
+        url = f"{self._base_url}/swap/order/place"
+        body_dict = {
+            "symbol": symbol,
+            "side": side.upper(),
+            "orderType": "MARKET",
+            "quantity": str(int(quantity)),
+        }
+        body = json.dumps(body_dict, separators=(",", ":"))
+        headers = self._headers(body)
+        resp = requests.post(url, headers=headers, data=body, timeout=10)
+        data = resp.json()
+        if resp.status_code == 200 and data.get("code") == 200:
+            order_id = data.get("data", {}).get("orderId")
+            if order_id:
+                logger.info(f"{self.NAME} market order placed: {symbol} {side} {quantity}, orderId={order_id}")
+            return order_id
+
+        err_code = data.get("code")
+        err_msg = data.get("msg") or data.get("message") or data.get("error") or resp.text
+        logger.warning(
+            f"{self.NAME} market order failed: {symbol} {side} {quantity} "
+            f"[code={err_code}] {err_msg}"
+        )
+        return None
+
     def cancel_order(self, symbol: str, order_id: str) -> bool:
         """POST /swap/order/cancel"""
         import logging

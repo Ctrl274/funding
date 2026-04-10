@@ -101,6 +101,15 @@ class ExchangeAdapter(ABC):
         """Place a Fill-or-Kill order. Returns order ID or None."""
 
     @abstractmethod
+    def place_market_order(
+        self,
+        symbol: str,
+        side: str,
+        quantity: float,
+    ) -> Optional[str]:
+        """Place a market order. Returns order ID or None."""
+
+    @abstractmethod
     def cancel_order(self, symbol: str, order_id: str) -> bool:
         """Cancel an existing order."""
 

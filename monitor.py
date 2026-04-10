@@ -229,7 +229,7 @@ class MonitorLoop:
             logger.info(f"Position too small after clamping to exchange limits for {symbol}")
             return
 
-        # Place FOK orders
+        # Place orders
         result = self._executor.execute_arbitrage(
             symbol=symbol,
             adapter_a=adapter_a,
@@ -239,6 +239,7 @@ class MonitorLoop:
             quantity=quantity,
             price_a=price_a,
             price_b=price_b,
+            order_type=self._config.strategy.order_type,
         )
 
         # Record position and trade

@@ -97,6 +97,23 @@ class MexcAdapter(ExchangeAdapter):
         )
         return result["id"]
 
+    def place_market_order(
+        self,
+        symbol: str,
+        side: str,
+        quantity: float,
+    ) -> Optional[str]:
+        try:
+            result = self._exchange.create_order(
+                symbol=self._normalize_symbol(symbol),
+                type="market",
+                side=side.lower(),
+                amount=quantity,
+            )
+            return result.get("id")
+        except Exception:
+            return None
+
     def cancel_order(self, symbol: str, order_id: str) -> None:
         self._exchange.cancel_order(
             order_id, self._normalize_symbol(symbol)

@@ -22,6 +22,7 @@ class StrategyConfig:
     """Configuration for the arbitrage strategy."""
 
     min_rate_diff: float = 0.01
+    order_type: str = "limit"
     position_mode: str = "fixed"
     position_value: float = 1000
     position_percent: float = 5.0
@@ -86,6 +87,7 @@ class Config:
         data = self._raw.get("strategy", {})
         return StrategyConfig(
             min_rate_diff=data.get("min_rate_diff", 0.01),
+            order_type=data.get("order_type", "limit"),
             position_mode=data.get("position_mode", "fixed"),
             position_value=data.get("position_value", 1000),
             position_percent=data.get("position_percent", 5.0),

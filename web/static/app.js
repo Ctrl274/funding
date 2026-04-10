@@ -243,6 +243,8 @@ function loadConfig() {
         setVal("leverage", cfg.strategy ? cfg.strategy.leverage : 5);
         var modeEl = document.getElementById("position-mode");
         if (modeEl && cfg.strategy) modeEl.value = cfg.strategy.position_mode || "fixed";
+        var orderEl = document.getElementById("order-type");
+        if (orderEl && cfg.strategy) orderEl.value = cfg.strategy.order_type || "limit";
         setVal("lark-webhook", cfg.notification ? cfg.notification.lark_webhook : "");
         var cb = document.getElementById("monitor-enabled");
         if (cb) cb.checked = cfg.monitor ? cfg.monitor.enabled : false;
@@ -265,6 +267,7 @@ function saveConfig(e) {
             max_concurrent: parseInt(form.querySelector("#max-concurrent").value, 10),
             position_value: parseFloat(form.querySelector("#position-value").value),
             position_mode: form.querySelector("#position-mode").value,
+            order_type: form.querySelector("#order-type").value,
             position_percent: parseFloat(form.querySelector("#position-percent").value),
             leverage: parseInt(form.querySelector("#leverage").value, 10),
         },
