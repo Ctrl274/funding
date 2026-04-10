@@ -39,6 +39,11 @@
                     </tbody>
                 </table>
             </div>
+            <div class="pagination">
+                <button id="page-prev" class="btn-page" data-i18n="page_prev" disabled>&laquo; 上页</button>
+                <span id="page-info">-</span>
+                <button id="page-next" class="btn-page" data-i18n="page_next" disabled>下页 &raquo;</button>
+            </div>
         </div>
     </div>
 
@@ -50,7 +55,7 @@
         Theme.init();
         I18N.init();
         refreshHistory();
-        setInterval(refreshHistory, 10000);
+        setInterval(refreshHistory, 30000);
     </script>
 </body>
 </html>

@@ -70,6 +70,8 @@ var I18N = {
             // Toast messages
             "toast_config_saved": "Config saved and reloaded",
             "toast_config_error": "Error saving config",
+            "page_prev": "Prev",
+            "page_next": "Next",
             "toast_position_closed": "Position {symbol} closed",
             "toast_close_failed": "Failed to close position {symbol}",
             // Confirm
@@ -134,6 +136,8 @@ var I18N = {
             "n_a": "N/A",
             "toast_config_saved": "Config saved and reloaded",
             "toast_config_error": "Error saving config",
+            "page_prev": "上页",
+            "page_next": "下页",
             "toast_position_closed": "Position {symbol} closed",
             "toast_close_failed": "Failed to close position {symbol}",
             "confirm_close": "Close {symbol} position?"

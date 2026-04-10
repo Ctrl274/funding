@@ -201,30 +201,74 @@ function closePosition(symbol, btn) {
 }
 
 /* === History === */
+var _historyPage = { limit: 20, offset: 0, total: 0 };
+
 function refreshHistory() {
-    api("/api/history").then(function(history) {
-        var tbody = document.getElementById("history-body");
-        if (!tbody) return;
-        if (!history || history.length === 0) {
-            tbody.innerHTML = "<tr><td colspan='6'><div class='empty-state'><div class='empty-text'>" + escapeHtml(I18N.t("empty_history")) + "</div></div></td></tr>";
-            return;
-        }
-        var html = "";
-        for (var i = 0; i < history.length; i++) {
-            var h = history[i];
-            var profit = h.profit !== null ? "$" + parseFloat(h.profit).toFixed(2) : "-";
-            var profitCls = h.profit > 0 ? "positive" : h.profit < 0 ? "negative" : "";
-            html += "<tr>" +
-                "<td>" + escapeHtml(h.created_at) + "</td>" +
-                "<td>" + escapeHtml(h.symbol) + "</td>" +
-                "<td>" + escapeHtml(h.high_exchange) + "-" + escapeHtml(h.low_exchange) + "</td>" +
-                "<td class='" + (parseFloat(h.rate_diff) > 0 ? "positive" : h.rate_diff < 0 ? "negative" : "") + "'>" + parseFloat(h.rate_diff).toFixed(4) + "%</td>" +
-                "<td>" + escapeHtml(h.result) + "</td>" +
-                "<td class='" + profitCls + "'>" + profit + "</td>" +
-                "</tr>";
-        }
-        tbody.innerHTML = html;
+    var params = "?limit=" + _historyPage.limit + "&offset=" + _historyPage.offset;
+    api("/api/history" + params).then(function(data) {
+        if (!data) return;
+        var history = data.items || [];
+        _historyPage.total = data.total || 0;
+        _historyPage.limit = data.limit || 20;
+        _historyPage.offset = data.offset || 0;
+
+        renderHistoryTable(history);
+        renderHistoryPagination();
     });
+}
+
+function renderHistoryTable(history) {
+    var tbody = document.getElementById("history-body");
+    if (!tbody) return;
+    if (!history || history.length === 0) {
+        tbody.innerHTML = "<tr><td colspan='6'><div class='empty-state'><div class='empty-text'>" + escapeHtml(I18N.t("empty_history")) + "</div></div></td></tr>";
+        return;
+    }
+    var html = "";
+    for (var i = 0; i < history.length; i++) {
+        var h = history[i];
+        var profit = h.profit !== null ? "$" + parseFloat(h.profit).toFixed(2) : "-";
+        var profitCls = h.profit > 0 ? "positive" : h.profit < 0 ? "negative" : "";
+        html += "<tr>" +
+            "<td>" + escapeHtml(h.created_at) + "</td>" +
+            "<td>" + escapeHtml(h.symbol) + "</td>" +
+            "<td>" + escapeHtml(h.high_exchange) + "-" + escapeHtml(h.low_exchange) + "</td>" +
+            "<td class='" + (parseFloat(h.rate_diff) > 0 ? "positive" : h.rate_diff < 0 ? "negative" : "") + "'>" + parseFloat(h.rate_diff).toFixed(4) + "%</td>" +
+            "<td>" + escapeHtml(h.result) + "</td>" +
+            "<td class='" + profitCls + "'>" + profit + "</td>" +
+            "</tr>";
+    }
+    tbody.innerHTML = html;
+}
+
+function renderHistoryPagination() {
+    var prevBtn = document.getElementById("page-prev");
+    var nextBtn = document.getElementById("page-next");
+    var info = document.getElementById("page-info");
+    if (!prevBtn || !nextBtn || !info) return;
+
+    var total = _historyPage.total;
+    var limit = _historyPage.limit;
+    var offset = _historyPage.offset;
+    var currentPage = Math.floor(offset / limit) + 1;
+    var totalPages = Math.ceil(total / limit);
+
+    info.textContent = total === 0 ? "-" : offset + 1 + "-" + Math.min(offset + limit, total) + " / " + total;
+    prevBtn.disabled = offset <= 0;
+    nextBtn.disabled = offset + limit >= total;
+
+    prevBtn.onclick = function() {
+        if (offset > 0) {
+            _historyPage.offset = Math.max(0, offset - limit);
+            refreshHistory();
+        }
+    };
+    nextBtn.onclick = function() {
+        if (offset + limit < total) {
+            _historyPage.offset = offset + limit;
+            refreshHistory();
+        }
+    };
 }
 
 /* === Settings === */

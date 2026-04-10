@@ -105,13 +105,16 @@ def create_app(monitor_ref=None, config_ref=None, db_ref=None):
 
     @app.route("/api/history")
     def api_history():
-        """History records."""
-        limit = request.args.get("limit", 100, type=int)
+        """Paginated history records. Returns {items, total, limit, offset}."""
+        limit = request.args.get("limit", 20, type=int)
+        offset = request.args.get("offset", 0, type=int)
         if limit is None or limit < 1:
-            limit = 100
+            limit = 20
+        if offset is None or offset < 0:
+            offset = 0
         if app.db:
-            return jsonify(app.db.get_history(limit=limit))
-        return jsonify([])
+            return jsonify(app.db.get_history(limit=limit, offset=offset))
+        return jsonify({"items": [], "total": 0, "limit": limit, "offset": offset})
 
     @app.route("/api/config")
     def api_config():

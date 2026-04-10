@@ -337,6 +337,43 @@ button.close-btn:hover {
     background: var(--close-btn-hover-bg);
 }
 
+/* === Pagination === */
+.pagination {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 12px;
+    padding: 16px 0 4px;
+    font-size: 13px;
+    color: var(--text-secondary);
+}
+
+button.btn-page {
+    background: transparent;
+    border: 1px solid var(--border);
+    color: var(--text-primary);
+    padding: 5px 14px;
+    border-radius: 4px;
+    font-size: 13px;
+    cursor: pointer;
+    transition: background 0.15s, border-color 0.15s;
+}
+
+button.btn-page:hover:not(:disabled) {
+    background: var(--hover-bg);
+    border-color: var(--accent);
+}
+
+button.btn-page:disabled {
+    opacity: 0.35;
+    cursor: not-allowed;
+}
+
+#page-info {
+    min-width: 80px;
+    text-align: center;
+}
+
 /* === Toast === */
 .toast {
     position: fixed;

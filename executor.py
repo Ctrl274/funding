@@ -71,7 +71,15 @@ class ExecutionEngine:
         price_a: float,
         price_b: float,
     ) -> OrderResult:
-        """Execute arbitrage using market orders."""
+        """
+        Execute arbitrage using market orders.
+
+        Market orders are verified via POSITION, not order status.
+        Reason: market orders fill instantly and disappear from open-order lists,
+        making get_order_status unreliable for filled market orders on exchanges
+        like Bybit (which requires special params for closed orders and has a
+        500-order history limit).
+        """
         order_a_id = adapter_a.place_market_order(symbol, side_a, quantity)
         order_b_id = adapter_b.place_market_order(symbol, side_b, quantity)
 
@@ -88,49 +96,54 @@ class ExecutionEngine:
                 error_b="order_b_submit_failed",
             )
 
-        # Market orders fill instantly, but verify status briefly
-        time.sleep(0.5)
+        # Poll via position: market order that fills = position created
+        # Wait a moment for exchange to settle and update position data
+        time.sleep(1.0)
 
-        status_a = adapter_a.get_order_status(symbol, order_a_id)
-        status_b = adapter_b.get_order_status(symbol, order_b_id)
+        deadline = time.time() + self.timeout
+        while time.time() < deadline:
+            pos_a = adapter_a.get_position(symbol)
+            pos_b = adapter_b.get_position(symbol)
 
-        filled_a = status_a == "filled"
-        filled_b = status_b == "filled"
+            has_pos_a = pos_a is not None and pos_a.get("quantity", 0) > 0
+            has_pos_b = pos_b is not None and pos_b.get("quantity", 0) > 0
 
-        if filled_a and filled_b:
-            return OrderResult(
-                status="filled",
-                order_a_id=order_a_id,
-                order_b_id=order_b_id,
-                fill_price_a=price_a,
-                fill_price_b=price_b,
-            )
+            if has_pos_a and has_pos_b:
+                return OrderResult(
+                    status="filled",
+                    order_a_id=order_a_id,
+                    order_b_id=order_b_id,
+                    fill_price_a=price_a,
+                    fill_price_b=price_b,
+                )
 
-        # Handle partial fills — cancel the filled side if the other failed
-        if filled_a and not filled_b:
-            adapter_a.cancel_order(symbol, order_a_id)
-            return OrderResult(
-                status="partial_fill",
-                order_a_id=order_a_id,
-                order_b_id=order_b_id,
-                error_b=f"status={status_b}",
-            )
-        if filled_b and not filled_a:
-            adapter_b.cancel_order(symbol, order_b_id)
-            return OrderResult(
-                status="partial_fill",
-                order_a_id=order_a_id,
-                order_b_id=order_b_id,
-                error_a=f"status={status_a}",
-            )
+            if has_pos_a and not has_pos_b:
+                adapter_a.cancel_order(symbol, order_a_id)
+                return OrderResult(
+                    status="partial_fill",
+                    order_a_id=order_a_id,
+                    order_b_id=order_b_id,
+                    error_b="no_position",
+                )
+            if has_pos_b and not has_pos_a:
+                adapter_b.cancel_order(symbol, order_b_id)
+                return OrderResult(
+                    status="partial_fill",
+                    order_a_id=order_a_id,
+                    order_b_id=order_b_id,
+                    error_a="no_position",
+                )
 
-        # Both failed
+            # Neither has position yet — wait and retry
+            time.sleep(self.poll_interval)
+
+        # Timeout — cancel any open orders
+        adapter_a.cancel_order(symbol, order_a_id)
+        adapter_b.cancel_order(symbol, order_b_id)
         return OrderResult(
-            status="failed",
+            status="timeout",
             order_a_id=order_a_id,
             order_b_id=order_b_id,
-            error_a=f"status={status_a}",
-            error_b=f"status={status_b}",
         )
 
     def _execute_limit(

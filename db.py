@@ -4,8 +4,10 @@ Records arbitrage trades and positions.
 """
 import sqlite3
 from typing import List, Dict, Optional
-from datetime import datetime
+from datetime import datetime, timezone, timedelta
 from pathlib import Path
+
+TZ_UTC8 = timezone(timedelta(hours=8))
 
 
 class Database:
@@ -16,7 +18,9 @@ class Database:
         self._init_db()
 
     def _connect(self):
-        return sqlite3.connect(self._db_path)
+        conn = sqlite3.connect(self._db_path)
+        conn.execute("PRAGMA timezone = '+08:00'")
+        return conn
 
     def _init_db(self):
         with self._connect() as conn:
@@ -73,22 +77,38 @@ class Database:
                     quantity, side_a, side_b, result, profit, error_a, error_b)
                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 (
-                    datetime.utcnow().isoformat(),
+                    datetime.now(TZ_UTC8).isoformat(),
                     symbol, high_exchange, low_exchange, rate_diff,
                     quantity, side_a, side_b, result, profit, error_a, error_b,
                 )
             )
             conn.commit()
 
-    def get_history(self, limit: int = 100) -> List[Dict]:
+    def get_history(self, limit: int = 20, offset: int = 0) -> Dict:
+        """Fetch paginated history records ordered by time descending.
+
+        Returns dict with:
+            - items: list of trade records
+            - total: total count of all records
+            - limit: page size
+            - offset: current offset
+        """
         with self._connect() as conn:
             conn.row_factory = sqlite3.Row
+            cur = conn.execute("SELECT COUNT(*) as cnt FROM trades")
+            total = cur.fetchone()["cnt"]
+
             cur = conn.execute(
-                "SELECT * FROM trades ORDER BY created_at DESC LIMIT ?",
-                (limit,)
+                "SELECT * FROM trades ORDER BY created_at DESC LIMIT ? OFFSET ?",
+                (limit, offset)
             )
             rows = cur.fetchall()
-            return [dict(row) for row in rows]
+            return {
+                "items": [dict(row) for row in rows],
+                "total": total,
+                "limit": limit,
+                "offset": offset,
+            }
 
     def save_position(self, symbol: str, **kwargs):
         with self._connect() as conn:

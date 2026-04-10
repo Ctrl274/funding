@@ -21,11 +21,13 @@ class TestDatabaseTrades:
                 result="filled",
                 profit=1.5,
             )
-            trades = db.get_history(limit=10)
-            assert len(trades) == 1
-            assert trades[0]["symbol"] == "BTC-USDT"
-            assert trades[0]["result"] == "filled"
-            assert trades[0]["profit"] == 1.5
+            result = db.get_history(limit=10)
+            assert "items" in result
+            assert len(result["items"]) == 1
+            assert result["items"][0]["symbol"] == "BTC-USDT"
+            assert result["items"][0]["result"] == "filled"
+            assert result["items"][0]["profit"] == 1.5
+            assert result["total"] == 1
 
     def test_get_history_respects_limit(self):
         """get_history 限制条数"""
@@ -35,8 +37,25 @@ class TestDatabaseTrades:
             for i in range(10):
                 db.save_trade(symbol=f"SYM{i}", high_exchange="a", low_exchange="b",
                               rate_diff=0.01, result="filled")
-            trades = db.get_history(limit=3)
-            assert len(trades) == 3
+            result = db.get_history(limit=3, offset=0)
+            assert len(result["items"]) == 3
+            assert result["total"] == 10
+
+    def test_get_history_pagination(self):
+        """分页查询正确"""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = os.path.join(tmpdir, "test.db")
+            db = Database(db_path)
+            for i in range(10):
+                db.save_trade(symbol=f"SYM{i}", high_exchange="a", low_exchange="b",
+                              rate_diff=0.01, result="filled")
+            result0 = db.get_history(limit=3, offset=0)
+            result5 = db.get_history(limit=3, offset=5)
+            assert len(result0["items"]) == 3
+            assert len(result5["items"]) == 3
+            assert result0["items"][0]["symbol"] != result5["items"][0]["symbol"]
+            assert result0["offset"] == 0
+            assert result5["offset"] == 5
 
     def test_save_trade_with_all_fields(self):
         """保存包含所有字段的交易记录"""
@@ -56,12 +75,12 @@ class TestDatabaseTrades:
                 error_a="status=unfilled",
                 error_b=None,
             )
-            trades = db.get_history(limit=1)
-            assert len(trades) == 1
-            assert trades[0]["symbol"] == "ETH-USDT"
-            assert trades[0]["result"] == "partial_fill"
-            assert trades[0]["profit"] == -0.5
-            assert trades[0]["error_a"] == "status=unfilled"
+            result = db.get_history(limit=1)
+            assert len(result["items"]) == 1
+            assert result["items"][0]["symbol"] == "ETH-USDT"
+            assert result["items"][0]["result"] == "partial_fill"
+            assert result["items"][0]["profit"] == -0.5
+            assert result["items"][0]["error_a"] == "status=unfilled"
 
 
 class TestDatabasePositions:

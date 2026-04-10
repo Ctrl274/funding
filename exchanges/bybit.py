@@ -83,6 +83,11 @@ class BybitAdapter(ExchangeAdapter):
         try:
             self._client.set_leverage(leverage, self._normalize_symbol(symbol))
             return True
+        except ccxt.ExchangeError as e:
+            # 110043 = "leverage not modified" — already at target, not an error
+            if "110043" in str(e) or "leverage not modified" in str(e).lower():
+                return True
+            return False
         except Exception:
             return False
 
@@ -208,9 +213,14 @@ class BybitAdapter(ExchangeAdapter):
         return {"maker": 0.0002, "taker": 0.0005}
 
     def get_ticker_price(self, symbol: str) -> Optional[float]:
-        """Fetch current last price via ccxt fetch_ticker."""
+        """Fetch current price. Uses indexPrice (more reliable than markPrice on testnet)."""
         try:
             ticker = self._client.fetch_ticker(self._normalize_symbol(symbol))
+            # Prefer indexPrice: markPrice/lastPrice can be wildly wrong on testnet
+            info = ticker.get("info", {})
+            index_price = info.get("indexPrice")
+            if index_price:
+                return float(index_price)
             return float(ticker["last"])
         except Exception:
             return None
