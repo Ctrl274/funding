@@ -2,6 +2,7 @@
 <html lang="zh">
 <head>
     <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Positions</title>
     <link rel="stylesheet" href="/static/style.css">
 </head>
@@ -14,25 +15,31 @@
     </nav>
 
     <div class="container">
+        <h1 class="page-title">Positions</h1>
+
         <div class="panel">
             <h2>Current Positions</h2>
-            <table id="positions-table">
-                <thead>
-                    <tr>
-                        <th>Symbol</th>
-                        <th>Long Exchange</th>
-                        <th>Short Exchange</th>
-                        <th>Quantity</th>
-                        <th>Open Time</th>
-                        <th>Action</th>
-                    </tr>
-                </thead>
-                <tbody id="positions-body">
-                    <tr><td colspan="6">Loading...</td></tr>
-                </tbody>
-            </table>
+            <div class="table-scroll">
+                <table id="positions-table">
+                    <thead>
+                        <tr>
+                            <th>Symbol</th>
+                            <th>Long Exchange</th>
+                            <th>Short Exchange</th>
+                            <th>Quantity</th>
+                            <th>Open Time</th>
+                            <th>Action</th>
+                        </tr>
+                    </thead>
+                    <tbody id="positions-body">
+                        <tr><td colspan="6"><div class="empty-state"><div class="loading-skeleton">Loading positions...</div></div></td></tr>
+                    </tbody>
+                </table>
+            </div>
         </div>
     </div>
+
+    <div id="toast-container"></div>
 
     <script src="/static/app.js"></script>
     <script>

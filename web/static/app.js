@@ -6,11 +6,34 @@ function escapeHtml(str) {
 }
 
 function api(url, options) {
-    return fetch(url, options || {}).then(function(r) { return r.json(); });
+    return fetch(url, options || {}).then(function(r) {
+        return r.json().then(function(data) {
+            return data;
+        }).catch(function() {
+            return null;
+        });
+    });
+}
+
+function showToast(message, type) {
+    var container = document.getElementById("toast-container");
+    if (!container) return;
+    var toast = document.createElement("div");
+    toast.className = "toast " + (type || "success");
+    toast.textContent = message;
+    container.appendChild(toast);
+    // Trigger reflow for animation
+    toast.offsetHeight;
+    toast.classList.add("show");
+    setTimeout(function() {
+        toast.classList.remove("show");
+        setTimeout(function() { container.removeChild(toast); }, 200);
+    }, 3000);
 }
 
 function refreshStatus() {
     api("/api/status").then(function(data) {
+        if (!data) return;
         document.getElementById("monitor-status").textContent =
             data.monitor_enabled ? "Running" : "Stopped";
         document.getElementById("next-settlement").textContent =
@@ -23,7 +46,7 @@ function refreshRates() {
     api("/api/rates").then(function(rows) {
         var tbody = document.getElementById("rates-body");
         if (!rows || rows.length === 0) {
-            tbody.innerHTML = "<tr><td colspan='7'>No data</td></tr>";
+            tbody.innerHTML = "<tr><td colspan='7'><div class='empty-state'><div class='empty-text'>No funding rate data available</div></div></td></tr>";
             return;
         }
         var allEx = ["binance", "bybit", "bydfi", "mexc"];
@@ -90,7 +113,7 @@ function refreshRates() {
                 "<td>" + escapeHtml(settlementStr) + "</td>" +
                 "</tr>";
         }
-        tbody.innerHTML = html || "<tr><td colspan='7'>No data</td></tr>";
+        tbody.innerHTML = html || "<tr><td colspan='7'><div class='empty-state'><div class='empty-text'>No pairs match the current filter criteria</div></div></td></tr>";
     });
 }
 
@@ -98,7 +121,7 @@ function refreshPositions() {
     api("/api/positions").then(function(positions) {
         var tbody = document.getElementById("positions-body");
         if (!positions || positions.length === 0) {
-            tbody.innerHTML = "<tr><td colspan='6'>No open positions</td></tr>";
+            tbody.innerHTML = "<tr><td colspan='6'><div class='empty-state'><div class='empty-text'>No open positions</div></div></td></tr>";
             return;
         }
         var html = "";
@@ -115,22 +138,40 @@ function refreshPositions() {
                 "<td><button data-symbol=\"" + safeSymbol + "\" class=\"close-btn\">Close</button></td>" +
                 "</tr>";
         }
+        tbody.innerHTML = html;
         // Attach click handlers after rendering
         var buttons = tbody.querySelectorAll(".close-btn");
         for (var b = 0; b < buttons.length; b++) {
             buttons[b].addEventListener("click", function() {
-                closePosition(this.getAttribute("data-symbol"));
+                closePosition(this.getAttribute("data-symbol"), this);
             });
         }
-        tbody.innerHTML = html;
     });
 }
 
-function closePosition(symbol) {
+function closePosition(symbol, btn) {
     if (!confirm("Close " + symbol + " position?")) return;
+    if (btn) {
+        btn.classList.add("loading");
+        btn.textContent = "Closing...";
+        btn.disabled = true;
+    }
     api("/api/positions/" + symbol + "/close", { method: "POST" }).then(function() {
         refreshPositions();
         refreshStatus();
+        if (btn) {
+            btn.classList.remove("loading");
+            btn.textContent = "Close";
+            btn.disabled = false;
+        }
+        showToast("Position " + symbol + " closed", "success");
+    }).catch(function() {
+        if (btn) {
+            btn.classList.remove("loading");
+            btn.textContent = "Close";
+            btn.disabled = false;
+        }
+        showToast("Failed to close position " + symbol, "error");
     });
 }
 
@@ -138,7 +179,7 @@ function refreshHistory() {
     api("/api/history").then(function(history) {
         var tbody = document.getElementById("history-body");
         if (!history || history.length === 0) {
-            tbody.innerHTML = "<tr><td colspan='6'>No history</td></tr>";
+            tbody.innerHTML = "<tr><td colspan='6'><div class='empty-state'><div class='empty-text'>No trade history yet</div></div></td></tr>";
             return;
         }
         var html = "";
@@ -150,7 +191,7 @@ function refreshHistory() {
                 "<td>" + escapeHtml(h.created_at) + "</td>" +
                 "<td>" + escapeHtml(h.symbol) + "</td>" +
                 "<td>" + escapeHtml(h.high_exchange) + "-" + escapeHtml(h.low_exchange) + "</td>" +
-                "<td>" + parseFloat(h.rate_diff).toFixed(4) + "%</td>" +
+                "<td class='" + (parseFloat(h.rate_diff) > 0 ? "positive" : h.rate_diff < 0 ? "negative" : "") + "'>" + parseFloat(h.rate_diff).toFixed(4) + "%</td>" +
                 "<td>" + escapeHtml(h.result) + "</td>" +
                 "<td class='" + profitCls + "'>" + profit + "</td>" +
                 "</tr>";
@@ -161,6 +202,7 @@ function refreshHistory() {
 
 function loadConfig() {
     api("/api/config").then(function(cfg) {
+        if (!cfg) return;
         var setVal = function(id, val) {
             var el = document.getElementById(id);
             if (el) el.value = val;
@@ -182,6 +224,9 @@ function loadConfig() {
 function saveConfig(e) {
     e.preventDefault();
     var form = e.target;
+    var btn = document.getElementById("save-btn");
+    if (btn) { btn.classList.add("loading"); btn.disabled = true; }
+
     var data = {
         monitor: {
             enabled: form.querySelector("#monitor-enabled").checked,
@@ -199,12 +244,18 @@ function saveConfig(e) {
             lark_webhook: form.querySelector("#lark-webhook").value,
         },
     };
+
+    function handleResult(r) {
+        if (btn) { btn.classList.remove("loading"); btn.disabled = false; }
+        if (r && r.status === "ok") showToast("Config saved and reloaded", "success");
+        else showToast("Error saving config", "error");
+    }
+
     api("/api/config", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(data),
-    }).then(function(r) {
-        if (r.status === "ok") alert("Config saved and reloaded!");
-        else alert("Error: " + JSON.stringify(r));
+    }).then(handleResult).catch(function() {
+        handleResult(null);
     });
 }
