@@ -1,27 +1,32 @@
-"""MEXC exchange adapter using ccxt."""
+"""MEXC exchange adapter using direct HTTP via HttpClient."""
 
-import ccxt
+import logging
 import requests
 from typing import Optional
 
 from exchanges.base import ExchangeAdapter, FundingRate
+from exchanges.http_client import HttpClient
+
+
+logger = logging.getLogger(__name__)
 
 
 class MexcAdapter(ExchangeAdapter):
-    """MEXC perpetual futures adapter via ccxt.
+    """MEXC perpetual futures adapter via HttpClient.
 
     MEXC uses underscore-separated symbols (e.g., BTC_USDT) internally,
     while the system uses dash-separated format (e.g., BTC-USDT).
     """
 
+    BASE_URL = "https://contract.mexc.com"
+
     def __init__(self, api_key: str, api_secret: str, testnet: bool = False, **kwargs) -> None:
         super().__init__(api_key, api_secret, testnet=testnet, **kwargs)
-        self._exchange = ccxt.mexc(
-            {
-                "apiKey": api_key,
-                "secret": api_secret,
-                "options": {"defaultType": "swap"},
-            }
+        self._http = HttpClient(
+            base_url=self.BASE_URL,
+            api_key=api_key,
+            api_secret=api_secret,
+            sign_mode="mexc",
         )
 
     def _normalize_symbol(self, symbol: str) -> str:
@@ -33,7 +38,7 @@ class MexcAdapter(ExchangeAdapter):
         return symbol.replace("_", "-")
 
     def get_funding_rates(self) -> dict:
-        """Fetch all funding rates via direct HTTP (MEXC ccxt doesn't support fetchFundingRates).
+        """Fetch all funding rates via direct HTTP (no ccxt needed).
 
         Public endpoint: GET /api/v1/contract/funding_rate
         Returns funding rate and next settlement time for all perpetual contracts.
@@ -76,26 +81,63 @@ class MexcAdapter(ExchangeAdapter):
         return result
 
     def get_account_balance(self) -> float:
-        balance = self._exchange.fetch_balance({"type": "swap"})
-        usdt_balance = balance.get("USDT", {})
-        free = usdt_balance.get("free", "0")
-        return float(free)
+        """Fetch USDT balance from signed account endpoint.
 
-    def set_leverage(self, symbol: str, leverage: int) -> None:
-        self._exchange.set_leverage(leverage, self._normalize_symbol(symbol))
+        Returns the available USDT balance, or 0.0 on error.
+        """
+        try:
+            data = self._http.signed_get("/api/v1/account/balance")
+            for asset in data.get("data", {}).get("asset_list", []):
+                if asset.get("asset") == "USDT":
+                    return float(asset.get("available_balance", 0))
+        except Exception as e:
+            logger.warning(f"mexc get_account_balance failed: {e}")
+        return 0.0
+
+    def set_leverage(self, symbol: str, leverage: int = 10) -> bool:
+        """Set leverage for a symbol via signed POST."""
+        try:
+            self._http.signed_post(
+                "/api/v1/account/contract",
+                params={
+                    "symbol": self._normalize_symbol(symbol),
+                    "leverage": str(leverage),
+                },
+            )
+            return True
+        except Exception as e:
+            logger.warning(f"mexc set_leverage failed: {symbol} {leverage} {e}")
+            return False
 
     def place_fok_order(
         self, symbol: str, side: str, quantity: float, price: float
-    ) -> str:
-        result = self._exchange.create_order(
-            symbol=self._normalize_symbol(symbol),
-            type="limit",
-            side=side.lower(),
-            amount=quantity,
-            price=price,
-            params={"timeInForce": "IOC"},
-        )
-        return result["id"]
+    ) -> Optional[str]:
+        """Place a Fill-or-Kill limit order via signed POST.
+
+        Returns the order ID on success, or None on failure.
+        """
+        try:
+            data = self._http.signed_post(
+                "/api/v1/order/place",
+                params={
+                    "symbol": self._normalize_symbol(symbol),
+                    "side": side.upper(),
+                    "type": "FOK",
+                    "quantity": str(quantity),
+                    "price": str(price),
+                },
+            )
+            order_id = data.get("data", {}).get("order_id")
+            if order_id:
+                logger.info(
+                    f"mexc order placed: {symbol} {side} {quantity} @ {price}, orderId={order_id}"
+                )
+            return order_id
+        except Exception as e:
+            logger.warning(
+                f"mexc order failed: {symbol} {side} {quantity} @ {price} {e}"
+            )
+            return None
 
     def place_market_order(
         self,
@@ -103,72 +145,166 @@ class MexcAdapter(ExchangeAdapter):
         side: str,
         quantity: float,
     ) -> Optional[str]:
+        """Place a market order via signed POST.
+
+        Returns the order ID on success, or None on failure.
+        """
         try:
-            result = self._exchange.create_order(
-                symbol=self._normalize_symbol(symbol),
-                type="market",
-                side=side.lower(),
-                amount=quantity,
+            data = self._http.signed_post(
+                "/api/v1/order/place",
+                params={
+                    "symbol": self._normalize_symbol(symbol),
+                    "side": side.upper(),
+                    "type": "MARKET",
+                    "quantity": str(quantity),
+                },
             )
-            return result.get("id")
-        except Exception:
+            order_id = data.get("data", {}).get("order_id")
+            if order_id:
+                logger.info(
+                    f"mexc market order placed: {symbol} {side} {quantity}, orderId={order_id}"
+                )
+            return order_id
+        except Exception as e:
+            logger.warning(
+                f"mexc market order failed: {symbol} {side} {quantity} {e}"
+            )
             return None
 
-    def cancel_order(self, symbol: str, order_id: str) -> None:
-        self._exchange.cancel_order(
-            order_id, self._normalize_symbol(symbol)
-        )
+    def cancel_order(self, symbol: str, order_id: str) -> bool:
+        """Cancel an existing order via signed POST."""
+        try:
+            self._http.signed_post(
+                "/api/v1/order/cancel",
+                params={
+                    "symbol": self._normalize_symbol(symbol),
+                    "order_id": order_id,
+                },
+            )
+            return True
+        except Exception as e:
+            logger.warning(f"mexc cancel_order failed: {symbol} {order_id} {e}")
+            return False
 
     def get_order_status(self, symbol: str, order_id: str) -> str:
-        order = self._exchange.fetch_order(
-            order_id, self._normalize_symbol(symbol)
-        )
-        if order["status"] == "closed":
-            return "filled"
-        return order["status"]
+        """Get order status via signed GET.
 
-    def get_position(self, symbol: str) -> dict:
-        positions = self._exchange.fetch_positions([self._normalize_symbol(symbol)])
-        if not positions:
-            return {}
-        pos = positions[0]
-        return {
-            "symbol": symbol,
-            "size": float(pos.get("contracts", 0) or 0),
-            "side": pos.get("side", ""),
-            "unrealized_pnl": float(pos.get("unrealizedPnl", 0) or 0),
-        }
+        Returns one of: 'filled', 'cancelled', 'unfilled', 'partial', 'unknown'.
+        """
+        try:
+            data = self._http.signed_get(
+                "/api/v1/order/detail",
+                params={
+                    "symbol": self._normalize_symbol(symbol),
+                    "order_id": order_id,
+                },
+            )
+            order = data.get("data", {})
+            status = order.get("status", "").lower()
+            if status == "filled":
+                return "filled"
+            if status == "cancelled" or status == "canceled":
+                return "cancelled"
+            if status == "partial":
+                return "partial"
+            return "unfilled"
+        except Exception:
+            return "unknown"
 
-    def close_position(self, symbol: str) -> None:
-        self._exchange.close_position(self._normalize_symbol(symbol))
+    def get_position(self, symbol: str) -> Optional[dict]:
+        """Get current position via signed GET.
 
-    def get_fee_rate(self, symbol: str) -> float:
-        markets = self._exchange.markets
-        normalized = self._normalize_symbol(symbol)
-        if normalized in markets:
-            return float(markets[normalized].get("taker", 0.001))
-        return 0.001
+        Returns a dict with 'symbol', 'quantity', 'side', 'unrealized_pnl',
+        or None if no position exists.
+        """
+        try:
+            data = self._http.signed_get(
+                "/api/v1/position/list",
+                params={"symbol": self._normalize_symbol(symbol)},
+            )
+            positions = data.get("data", [])
+            if not positions:
+                return None
+            pos = positions[0]
+            available_qty = float(pos.get("available_quantity", 0) or 0)
+            if available_qty <= 0:
+                return None
+            return {
+                "symbol": symbol,
+                "quantity": available_qty,
+                "side": pos.get("side", "").upper(),
+                "unrealized_pnl": float(pos.get("unrealized_pnl", 0) or 0),
+            }
+        except Exception as e:
+            logger.warning(f"mexc get_position failed: {symbol} {e}")
+            return None
+
+    def close_position(self, symbol: str) -> bool:
+        """Close position via market order (opposite side)."""
+        try:
+            pos = self.get_position(symbol)
+            if not pos:
+                return False
+            close_side = "SELL" if pos["side"] == "BUY" else "BUY"
+            self.place_market_order(symbol, close_side, pos["quantity"])
+            logger.info(f"mexc position closed: {symbol}")
+            return True
+        except Exception as e:
+            logger.warning(f"mexc close_position failed: {symbol} {e}")
+            return False
+
+    def get_fee_rate(self, symbol: str) -> dict:
+        """Fetch taker/maker fee rates from MEXC contract detail API.
+
+        Returns {'maker': float, 'taker': float}, or defaults on error.
+        """
+        try:
+            resp = requests.get(
+                "https://contract.mexc.com/api/v1/contract/detail",
+                params={"symbol": self._normalize_symbol(symbol)},
+                timeout=10,
+            )
+            resp.raise_for_status()
+            data = resp.json().get("data", {})
+            taker = float(data.get("taker_fee", 0.001))
+            maker = float(data.get("maker_fee", 0.0005))
+            return {"maker": maker, "taker": taker}
+        except Exception:
+            return {"maker": 0.0005, "taker": 0.001}
 
     def get_ticker_price(self, symbol: str) -> Optional[float]:
-        """Fetch current last price via ccxt fetch_ticker."""
+        """Fetch current last price from MEXC public ticker endpoint."""
         try:
-            ticker = self._exchange.fetch_ticker(self._normalize_symbol(symbol))
-            return float(ticker["last"])
+            resp = requests.get(
+                "https://contract.mexc.com/api/v1/contract/ticker",
+                params={"symbol": self._normalize_symbol(symbol)},
+                timeout=10,
+            )
+            resp.raise_for_status()
+            data = resp.json().get("data", {})
+            last = data.get("last")
+            if last is not None:
+                return float(last)
         except Exception:
-            return None
+            pass
+        return None
 
     def get_max_position(self, symbol: str) -> Optional[float]:
-        """Get maximum position size from MEXC position info."""
+        """Get maximum position size from MEXC position info via signed GET."""
         try:
-            pos = self._exchange.fetch_position(self._normalize_symbol(symbol))
-            if pos:
-                info = pos.get("info", {})
-                max_qty = info.get("maxOpenOrderSize") or info.get("maxPositionSize")
+            data = self._http.signed_get(
+                "/api/v1/position/list",
+                params={"symbol": self._normalize_symbol(symbol)},
+            )
+            positions = data.get("data", [])
+            if positions:
+                pos = positions[0]
+                max_qty = pos.get("max_position_size") or pos.get("max_open_order_size")
                 if max_qty is not None:
                     return float(max_qty)
-            return None
         except Exception:
-            return None
+            pass
+        return None
 
     def get_contract_size(self, symbol: str) -> float:
         """Get contract multiplier from MEXC contract detail API.
@@ -177,15 +313,14 @@ class MexcAdapter(ExchangeAdapter):
         e.g. BTC_USDT contractSize=0.0001 means 1 contract = 0.0001 BTC.
         """
         try:
-            mexc_sym = self._normalize_symbol(symbol)
             resp = requests.get(
                 "https://contract.mexc.com/api/v1/contract/detail",
-                params={"symbol": mexc_sym},
+                params={"symbol": self._normalize_symbol(symbol)},
                 timeout=10,
             )
             resp.raise_for_status()
             data = resp.json().get("data", {})
-            cs = data.get("contractSize")
+            cs = data.get("contract_size")
             if cs is not None:
                 return float(cs)
         except Exception:
