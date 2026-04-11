@@ -1,12 +1,13 @@
 """
 Bybit 交易所适配器。
-使用直接 HTTP 调用获取资金费率（绕过 ccxt 的 bug），
-其他操作使用 ccxt。
+使用直接 V5 HTTP API 调用，完全替代 ccxt。
 """
-import ccxt
+
 import httpx
 from typing import Dict, Optional
+
 from .base import ExchangeAdapter, FundingRate
+from .http_client import HttpClient
 
 
 class BybitAdapter(ExchangeAdapter):
@@ -15,32 +16,41 @@ class BybitAdapter(ExchangeAdapter):
     def __init__(self, api_key: str, api_secret: str, testnet: bool = False):
         super().__init__(api_key, api_secret, testnet)
         self._testnet = testnet
-        self._client = ccxt.bybit({
-            "apiKey": api_key,
-            "secret": api_secret,
-        })
-        if testnet:
-            self._client.set_sandbox_mode(True)
+        base_url = (
+            "https://api-demo.bybit.com"
+            if testnet
+            else "https://api.bybit.com"
+        )
+        self._http = HttpClient(
+            base_url=base_url,
+            api_key=api_key,
+            api_secret=api_secret,
+            sign_mode="bybit",
+        )
         self._funding_url = (
-            "https://api-testnet.bybit.com/v5/market/tickers?category=linear"
+            "https://api-demo.bybit.com/v5/market/tickers?category=linear"
             if testnet
             else "https://api.bybit.com/v5/market/tickers?category=linear"
         )
 
-    def _normalize_symbol(self, symbol: str) -> str:
-        """BTC-USDT -> BTC/USDT:USDT (ccxt linear perpetual format)."""
-        base, quote = symbol.split("-", 1)
-        return f"{base}/{quote}:{quote}"
+    # -------------------------------------------------------------------------
+    # Symbol helpers
+    # -------------------------------------------------------------------------
 
-    def _denormalize_symbol(self, ccxt_sym: str) -> str:
+    def _to_bybit_symbol(self, symbol: str) -> str:
+        """BTC-USDT -> BTCUSDT"""
+        return symbol.replace("-", "")
+
+    def _from_bybit_symbol(self, bybit_sym: str) -> str:
         """BTCUSDT -> BTC-USDT"""
-        return ccxt_sym.replace("USDT", "-USDT")
+        return bybit_sym.replace("USDT", "-USDT")
+
+    # -------------------------------------------------------------------------
+    # Public endpoints (no auth) — keep using httpx directly
+    # -------------------------------------------------------------------------
 
     def get_funding_rates(self) -> Dict[str, FundingRate]:
-        """Fetch funding rates via direct HTTP (bypasses ccxt bug).
-
-        The public /v5/market/tickers endpoint requires no authentication.
-        """
+        """Fetch funding rates via direct HTTP (public endpoint, no auth)."""
         result: Dict[str, FundingRate] = {}
         try:
             resp = httpx.get(self._funding_url, timeout=10)
@@ -66,7 +76,8 @@ class BybitAdapter(ExchangeAdapter):
                 next_settlement = int(int(next_time_ms_str) / 1000)
             except (ValueError, TypeError):
                 next_settlement = 0
-            sym = sym_raw.replace("USDT", "-USDT")
+
+            sym = self._from_bybit_symbol(sym_raw)
 
             result[sym] = FundingRate(
                 symbol=sym,
@@ -75,19 +86,73 @@ class BybitAdapter(ExchangeAdapter):
             )
         return result
 
+    def get_ticker_price(self, symbol: str) -> Optional[float]:
+        """Fetch current price. Uses direct HTTP for demo mode."""
+        try:
+            base_url = (
+                "https://api-demo.bybit.com"
+                if self._testnet
+                else "https://api.bybit.com"
+            )
+            resp = httpx.get(
+                f"{base_url}/v5/market/tickers",
+                params={"category": "linear", "symbol": self._to_bybit_symbol(symbol)},
+                timeout=10,
+            )
+            resp.raise_for_status()
+            data = resp.json()
+            items = data.get("result", {}).get("list", [])
+            if items:
+                return float(items[0].get("lastPrice", 0)) or None
+            return None
+        except Exception:
+            return None
+
+    # -------------------------------------------------------------------------
+    # Private signed endpoints — use HttpClient
+    # -------------------------------------------------------------------------
+
     def get_account_balance(self) -> float:
-        balance = self._client.fetch_balance({"type": "swap", "coin": "USDT"})
-        return float(balance.get("USDT", {}).get("free", 0))
+        """Fetch USDT balance via V5 wallet-balance endpoint.
+
+        Returns equity (available + unrealized PnL) from the UNIFIED account.
+        """
+        try:
+            data = self._http.signed_get(
+                "/v5/account/wallet-balance",
+                params={"accountType": "UNIFIED"},
+            )
+            for account in data.get("result", {}).get("list", []):
+                for coin in account.get("coin", []):
+                    if coin.get("coin") == "USDT":
+                        # available may be null on demo/prod; fall back to equity
+                        avail = coin.get("available")
+                        if avail is not None and avail != "":
+                            return float(avail)
+                        # fallback to walletBalance then equity
+                        wb = coin.get("walletBalance")
+                        if wb is not None and wb != "":
+                            return float(wb)
+                        equity = coin.get("equity")
+                        if equity is not None and equity != "":
+                            return float(equity)
+            return 0.0
+        except Exception:
+            return 0.0
 
     def set_leverage(self, symbol: str, leverage: int = 10) -> bool:
+        """Set leverage via V5 set-leverage endpoint."""
         try:
-            self._client.set_leverage(leverage, self._normalize_symbol(symbol))
-            return True
-        except ccxt.ExchangeError as e:
-            # 110043 = "leverage not modified" — already at target, not an error
-            if "110043" in str(e) or "leverage not modified" in str(e).lower():
-                return True
-            return False
+            data = self._http.signed_post(
+                "/v5/position/set-leverage",
+                params={
+                    "category": "linear",
+                    "symbol": self._to_bybit_symbol(symbol),
+                    "buyLeverage": str(leverage),
+                    "sellLeverage": str(leverage),
+                },
+            )
+            return data.get("retCode") == 0
         except Exception:
             return False
 
@@ -98,22 +163,36 @@ class BybitAdapter(ExchangeAdapter):
         quantity: float,
         price: float,
     ) -> Optional[str]:
+        """Place a Fill-or-Kill limit order via V5 place-order."""
         import logging
         logger = logging.getLogger(__name__)
         try:
-            order = self._client.create_order(
-                symbol=self._normalize_symbol(symbol),
-                type="limit",
-                side=side.lower(),
-                amount=quantity,
-                price=price,
-                params={"timeInForce": "IOC"},
+            data = self._http.signed_post(
+                "/v5/order/place",
+                params={
+                    "category": "linear",
+                    "symbol": self._to_bybit_symbol(symbol),
+                    "side": side.upper(),
+                    "orderType": "Limit",
+                    "qty": str(quantity),
+                    "price": str(price),
+                    "timeInForce": "FOK",
+                },
             )
-            order_id = order.get("id")
-            logger.info(f"{self.NAME} order placed: {symbol} {side} {quantity} @ {price}, orderId={order_id}")
+            order_id = data.get("result", {}).get("orderId")
+            if order_id:
+                logger.info(
+                    f"bybit order placed: {symbol} {side} {quantity} @ {price}, orderId={order_id}"
+                )
+            else:
+                logger.warning(
+                    f"bybit order placed but no orderId returned: {symbol} {side} {quantity} @ {price}"
+                )
             return order_id
         except Exception as e:
-            logger.warning(f"{self.NAME} order failed: {symbol} {side} {quantity} @ {price} {e}")
+            logger.warning(
+                f"bybit order failed: {symbol} {side} {quantity} @ {price} {e}"
+            )
             return None
 
     def place_market_order(
@@ -122,115 +201,179 @@ class BybitAdapter(ExchangeAdapter):
         side: str,
         quantity: float,
     ) -> Optional[str]:
+        """Place a market order via V5 place-order."""
         import logging
         logger = logging.getLogger(__name__)
         try:
-            order = self._client.create_order(
-                symbol=self._normalize_symbol(symbol),
-                type="market",
-                side=side.lower(),
-                amount=quantity,
+            data = self._http.signed_post(
+                "/v5/order/place",
+                params={
+                    "category": "linear",
+                    "symbol": self._to_bybit_symbol(symbol),
+                    "side": side.upper(),
+                    "orderType": "Market",
+                    "qty": str(quantity),
+                },
             )
-            order_id = order.get("id")
-            logger.info(f"{self.NAME} market order placed: {symbol} {side} {quantity}, orderId={order_id}")
+            order_id = data.get("result", {}).get("orderId")
+            if order_id:
+                logger.info(
+                    f"bybit market order placed: {symbol} {side} {quantity}, orderId={order_id}"
+                )
             return order_id
         except Exception as e:
-            logger.warning(f"{self.NAME} market order failed: {symbol} {side} {quantity} {e}")
+            logger.warning(
+                f"bybit market order failed: {symbol} {side} {quantity} {e}"
+            )
             return None
 
     def cancel_order(self, symbol: str, order_id: str) -> bool:
+        """Cancel an order via V5 cancel-order."""
         try:
-            self._client.cancel_order(order_id, self._normalize_symbol(symbol))
-            return True
+            data = self._http.signed_post(
+                "/v5/order/cancel",
+                params={
+                    "category": "linear",
+                    "symbol": self._to_bybit_symbol(symbol),
+                    "orderId": order_id,
+                },
+            )
+            return data.get("retCode") == 0
         except Exception:
             return False
 
     def get_order_status(self, symbol: str, order_id: str) -> str:
+        """Get order status via V5 order/realtime."""
         try:
-            order = self._client.fetch_order(order_id, self._normalize_symbol(symbol))
-            filled = float(order.get("filled", 0))
-            amount = float(order.get("amount", 1))
-            if filled == amount:
+            data = self._http.signed_get(
+                "/v5/order/realtime",
+                params={
+                    "category": "linear",
+                    "symbol": self._to_bybit_symbol(symbol),
+                    "orderId": order_id,
+                },
+            )
+            items = data.get("result", {}).get("list", [])
+            if not items:
+                return "unknown"
+            order = items[0]
+            status = order.get("orderStatus", "")
+            filled = float(order.get("filledQty", 0))
+            qty = float(order.get("qty", 1))
+            if filled == qty:
                 return "filled"
-            elif filled > 0:
+            if filled > 0:
                 return "partial"
-            # IOC 订单撮合后 ccxt 可能返回 "open" 或 "new" 而非 "closed"
-            status = order.get("status", "")
-            if status in ("cancelled", "rejected", "canceled"):
+            if status in ("Cancelled", "Rejected", "Canceled"):
                 return "cancelled"
-            if status == "closed":
+            if status == "Deactivated":
                 return "cancelled"
             return "unfilled"
         except Exception:
             return "unknown"
 
     def get_position(self, symbol: str) -> Optional[Dict]:
+        """Get position info via V5 position/list."""
         try:
-            pos = self._client.fetch_position(self._normalize_symbol(symbol))
-            if pos and float(pos.get("contracts", 0)) > 0:
-                return {
-                    "side": "BUY" if pos.get("unrealizedPnl", 0) >= 0 else "SELL",
-                    "quantity": float(pos["contracts"]),
-                    "entry_price": float(pos.get("entryPrice", 0)),
-                }
+            data = self._http.signed_get(
+                "/v5/position/list",
+                params={
+                    "category": "linear",
+                    "symbol": self._to_bybit_symbol(symbol),
+                },
+            )
+            positions = data.get("result", {}).get("list", [])
+            for pos in positions:
+                size_str = pos.get("size", "0")
+                size = float(size_str)
+                if size > 0:
+                    return {
+                        "side": "BUY" if pos.get("side", "").upper() == "BUY" else "SELL",
+                        "quantity": size,
+                        "entry_price": float(pos.get("avgPrice", 0)),
+                    }
             return None
         except Exception:
             return None
 
     def close_position(self, symbol: str) -> bool:
-        """Close position via reverse market order (ccxt closePosition not supported for bybit)."""
+        """Close position via V5 position/close."""
         import logging
         logger = logging.getLogger(__name__)
         try:
-            pos = self.get_position(symbol)
-            if not pos:
-                return False
-            close_side = "sell" if pos["side"] == "BUY" else "buy"
-            self._client.create_order(
-                symbol=self._normalize_symbol(symbol),
-                type="market",
-                side=close_side,
-                amount=pos["quantity"],
-                params={"reduceOnly": True},
+            data = self._http.signed_post(
+                "/v5/position/close",
+                params={
+                    "category": "linear",
+                    "symbol": self._to_bybit_symbol(symbol),
+                },
             )
             logger.info(f"bybit position closed: {symbol}")
-            return True
+            return data.get("retCode") == 0
         except Exception as e:
             logger.warning(f"bybit close_position failed: {symbol} {e}")
             return False
 
     def get_fee_rate(self, symbol: str) -> Dict[str, float]:
+        """Get fee rate from V5 instruments-info endpoint."""
         try:
-            markets = self._client.fetch_markets()
-            for m in markets:
-                if m.get("symbol", "").upper() == self._normalize_symbol(symbol).upper():
-                    return {
-                        "maker": float(m.get("maker", 0.0002)),
-                        "taker": float(m.get("taker", 0.0005)),
-                    }
+            base_url = (
+                "https://api-demo.bybit.com"
+                if self._testnet
+                else "https://api.bybit.com"
+            )
+            resp = httpx.get(
+                f"{base_url}/v5/market/instruments-info",
+                params={"category": "linear", "symbol": self._to_bybit_symbol(symbol)},
+                timeout=10,
+            )
+            resp.raise_for_status()
+            data = resp.json()
+            items = data.get("result", {}).get("list", [])
+            if items:
+                item = items[0]
+                return {
+                    "maker": float(item.get("makerFeeRate", 0.0002)),
+                    "taker": float(item.get("takerFeeRate", 0.0005)),
+                }
         except Exception:
             pass
         return {"maker": 0.0002, "taker": 0.0005}
 
-    def get_ticker_price(self, symbol: str) -> Optional[float]:
-        """Fetch current price. Uses indexPrice (more reliable than markPrice on testnet)."""
-        try:
-            ticker = self._client.fetch_ticker(self._normalize_symbol(symbol))
-            # Prefer indexPrice: markPrice/lastPrice can be wildly wrong on testnet
-            info = ticker.get("info", {})
-            index_price = info.get("indexPrice")
-            if index_price:
-                return float(index_price)
-            return float(ticker["last"])
-        except Exception:
-            return None
-
     def get_max_position(self, symbol: str) -> Optional[float]:
-        """Get maximum position size from Bybit position info."""
+        """Get maximum position size from V5 position/list risk limit info."""
         try:
-            pos = self._client.fetch_position(self._normalize_symbol(symbol))
-            if pos:
-                return float(pos.get("info", {}).get("maxPositionSize", 0)) or None
+            # First get the position to find riskId, then get risk limits
+            data = self._http.signed_get(
+                "/v5/position/list",
+                params={
+                    "category": "linear",
+                    "symbol": self._to_bybit_symbol(symbol),
+                },
+            )
+            positions = data.get("result", {}).get("list", [])
+            if not positions:
+                return None
+            pos = positions[0]
+            risk_id = pos.get("riskId")
+            if not risk_id:
+                return None
+
+            # Get risk limits
+            risk_data = self._http.signed_get(
+                "/v5/position/risk-limit-info",
+                params={
+                    "category": "linear",
+                    "symbol": self._to_bybit_symbol(symbol),
+                    "riskId": risk_id,
+                },
+            )
+            risk_list = risk_data.get("result", {}).get("list", [])
+            for risk in risk_list:
+                if str(risk.get("id")) == str(risk_id):
+                    max_limit = risk.get("maxLimit")
+                    if max_limit is not None:
+                        return float(max_limit)
             return None
         except Exception:
             return None
