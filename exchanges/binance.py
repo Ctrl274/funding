@@ -1,12 +1,10 @@
-"""Binance exchange adapter using ccxt + direct HTTP for public endpoints."""
+"""Binance exchange adapter using direct HTTP API."""
 
 import time
 import hmac
 import hashlib
 import requests
 from typing import Any, Dict, List, Optional
-
-import ccxt
 
 from exchanges.base import ExchangeAdapter, FundingRate
 
@@ -34,20 +32,13 @@ class BinanceAdapter(ExchangeAdapter):
     ) -> None:
         super().__init__(api_key, api_secret, **kwargs)
         self._testnet = testnet
-        # Use Binance Demo environment for testnet (not the deprecated testnet)
-        # https://developers.binance.com/docs/derivatives/usds-margined-futures/general-info
-        demo_base = "https://demo-fapi.binance.com"
+        # Use demo-fapi.binance.com for testnet (shared market data + virtual funds),
+        # fapi.binance.com for production
+        testnet_base = "https://demo-fapi.binance.com"
         prod_base = "https://fapi.binance.com"
-        self._funding_url = f"{demo_base if testnet else prod_base}/fapi/v1/premiumIndex"
-        self._ticker_url = f"{demo_base if testnet else prod_base}/fapi/v1/ticker/price"
-        self._api_base = f"{demo_base if testnet else prod_base}/fapi/v1"
-        self._exchange: ccxt.binance = ccxt.binance(
-            {
-                "apiKey": api_key,
-                "secret": api_secret,
-                "options": {"defaultType": "future"},
-            }
-        )
+        self._funding_url = f"{testnet_base if testnet else prod_base}/fapi/v1/premiumIndex"
+        self._ticker_url = f"{testnet_base if testnet else prod_base}/fapi/v1/ticker/price"
+        self._api_base = f"{testnet_base if testnet else prod_base}/fapi/v1"
 
     # -------------------------------------------------------------------------
     # Helper methods

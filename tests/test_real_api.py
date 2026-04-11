@@ -58,7 +58,7 @@ def get_real_prices(adapters):
     return price_binance, price_bybit
 
 
-def test_market_order_status_poll(adapters):
+def _test_market_order_status_poll(adapters):
     """Test: place market order, poll status every second for 10 seconds."""
     print("\n=== Test: Market Order Status Polling ===")
 
@@ -101,7 +101,7 @@ def test_market_order_status_poll(adapters):
         print(f"  close_position: {result}")
 
 
-def test_executor_market_flow(adapters, price_a, price_b):
+def _test_executor_market_flow(adapters, price_a, price_b):
     """Test: run full executor flow with market orders."""
     print(f"\n=== Test: Executor Market Order Flow ===")
     print(f"  prices: binance={price_a}, bybit={price_b}")
@@ -126,7 +126,8 @@ def test_executor_market_flow(adapters, price_a, price_b):
         adapter_b=adapter_b,
         side_a="BUY",
         side_b="SELL",
-        quantity=qty,
+        quantity_a=qty,
+        quantity_b=qty,
         price_a=price_a,
         price_b=price_b,
         order_type="market",
@@ -159,8 +160,8 @@ def main():
     print(f"Adapters: {list(adapters.keys())}")
 
     price_a, price_b = get_real_prices(adapters)
-    test_market_order_status_poll(adapters)
-    result = test_executor_market_flow(adapters, price_a, price_b)
+    _test_market_order_status_poll(adapters)
+    result = _test_executor_market_flow(adapters, price_a, price_b)
 
     print("\n" + "=" * 60)
     if result.status == "filled":
