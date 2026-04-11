@@ -3,6 +3,7 @@ Bybit 交易所适配器。
 使用直接 V5 HTTP API 调用，完全替代 ccxt。
 """
 
+import logging
 import httpx
 from typing import Dict, Optional
 
@@ -43,7 +44,9 @@ class BybitAdapter(ExchangeAdapter):
 
     def _from_bybit_symbol(self, bybit_sym: str) -> str:
         """BTCUSDT -> BTC-USDT"""
-        return bybit_sym.replace("USDT", "-USDT")
+        if bybit_sym.endswith("USDT"):
+            return bybit_sym[:-4] + "-USDT"
+        return bybit_sym  # fallback: return as-is
 
     # -------------------------------------------------------------------------
     # Public endpoints (no auth) — keep using httpx directly
@@ -164,7 +167,6 @@ class BybitAdapter(ExchangeAdapter):
         price: float,
     ) -> Optional[str]:
         """Place a Fill-or-Kill limit order via V5 place-order."""
-        import logging
         logger = logging.getLogger(__name__)
         try:
             data = self._http.signed_post(
@@ -202,7 +204,6 @@ class BybitAdapter(ExchangeAdapter):
         quantity: float,
     ) -> Optional[str]:
         """Place a market order via V5 place-order."""
-        import logging
         logger = logging.getLogger(__name__)
         try:
             data = self._http.signed_post(
@@ -298,7 +299,6 @@ class BybitAdapter(ExchangeAdapter):
 
     def close_position(self, symbol: str) -> bool:
         """Close position via V5 position/close."""
-        import logging
         logger = logging.getLogger(__name__)
         try:
             data = self._http.signed_post(
