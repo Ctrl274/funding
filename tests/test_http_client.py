@@ -134,8 +134,8 @@ class TestBinanceSigning:
 class TestBybitSigning:
     """Verify Bybit HMAC-SHA256(TIMESTAMP + API_KEY + RECV_WINDOW + query + body) format."""
 
-    def test_sign_bybit_adds_api_key_timestamp_recvwindow_sign(self):
-        """Signed params should include api_key, timestamp, recv_window, and sign."""
+    def test_sign_bybit_adds_auth_fields(self):
+        """Signed params should include _bybit_timestamp and _bybit_sign."""
         client = HttpClient(
             "https://api.bybit.com",
             "test_key",
@@ -146,12 +146,11 @@ class TestBybitSigning:
         params = {"symbol": "BTCUSDT"}
         signed = client._sign_bybit(params, body="")
 
-        assert "api_key" in signed
-        assert "timestamp" in signed
-        assert "recv_window" in signed
-        assert "sign" in signed
-        assert signed["api_key"] == "test_key"
-        assert signed["recv_window"] == "5000"
+        assert "_bybit_timestamp" in signed
+        assert "_bybit_sign" in signed
+        assert "symbol" in signed
+        # Auth fields prefixed with _ should NOT appear in URL
+        assert not any(k.startswith("_") for k in ["symbol"])
 
     def test_sign_bybit_params_sorted(self):
         """Query params must be sorted alphabetically before signing."""
@@ -165,11 +164,11 @@ class TestBybitSigning:
         params = {"z_param": "z", "a_param": "a"}
         signed = client._sign_bybit(params, body="")
 
-        ts = signed["timestamp"]
+        ts = signed["_bybit_timestamp"]
         # sign_str = ts + api_key + recv_window + "a_param=a&z_param=z" + body
         expected_str = ts + "test_key" + "5000" + "a_param=a&z_param=z"
         expected_sig = _hmac_sha256("test_secret", expected_str)
-        assert signed["sign"] == expected_sig
+        assert signed["_bybit_sign"] == expected_sig
 
     def test_sign_bybit_with_body(self):
         """Body is appended to the signing string."""
@@ -184,11 +183,11 @@ class TestBybitSigning:
         body = '{"side":"BUY","qty":"1"}'
         signed = client._sign_bybit(params, body=body)
 
-        ts = signed["timestamp"]
+        ts = signed["_bybit_timestamp"]
         # sign_str = ts + api_key + recv_window + "symbol=BTCUSDT" + body
         expected_str = ts + "test_key" + "5000" + "symbol=BTCUSDT" + body
         expected_sig = _hmac_sha256("test_secret", expected_str)
-        assert signed["sign"] == expected_sig
+        assert signed["_bybit_sign"] == expected_sig
 
     def test_signed_post_bybit_headers(self):
         """Bybit POST should include X-BAPI-* headers."""

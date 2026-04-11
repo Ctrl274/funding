@@ -193,11 +193,13 @@ class HttpClient:
         Signature = HMAC-SHA256(
             TIMESTAMP + API_KEY + RECV_WINDOW + sorted_query_string + body
         )
+
+        Auth fields (timestamp, sign, etc.) are sent via headers only,
+        NOT in query params. The sign string only includes business params.
         """
-        import copy
         ts = str(int(time.time() * 1000))
 
-        # Sort params alphabetically
+        # Sort params alphabetically for the signing string
         sorted_items = sorted((k, str(v)) for k, v in params.items())
         query = "&".join(f"{k}={v}" for k, v in sorted_items)
 
@@ -208,12 +210,12 @@ class HttpClient:
             self._api_secret.encode(), sign_str.encode(), hashlib.sha256
         ).hexdigest()
 
-        # Add auth fields to params
+        # Return business params only; auth goes in headers via _headers_get
+        # Store auth fields under _bybit_ prefix so headers can read them
+        # but _build_url won't include them in the query string
         p = {k: str(v) for k, v in params.items()}
-        p["api_key"] = self._api_key
-        p["timestamp"] = ts
-        p["recv_window"] = self._recv_window
-        p["sign"] = sig
+        p["_bybit_timestamp"] = ts
+        p["_bybit_sign"] = sig
         return p
 
     def _sign_bydfi(self, params: Dict[str, Any], body: str) -> Dict[str, str]:
@@ -273,9 +275,9 @@ class HttpClient:
         elif mode == "bybit":
             return {
                 "X-BAPI-API-KEY": self._api_key,
-                "X-BAPI-SIGN": signed["sign"],
+                "X-BAPI-SIGN": signed["_bybit_sign"],
                 "X-BAPI-SIGN-TYPE": "2",
-                "X-BAPI-TIMESTAMP": signed["timestamp"],
+                "X-BAPI-TIMESTAMP": signed["_bybit_timestamp"],
                 "X-BAPI-RECV-WINDOW": self._recv_window,
             }
         elif mode == "bydfi":
@@ -301,9 +303,9 @@ class HttpClient:
         elif mode == "bybit":
             return {
                 "X-BAPI-API-KEY": self._api_key,
-                "X-BAPI-SIGN": signed["sign"],
+                "X-BAPI-SIGN": signed["_bybit_sign"],
                 "X-BAPI-SIGN-TYPE": "2",
-                "X-BAPI-TIMESTAMP": signed["timestamp"],
+                "X-BAPI-TIMESTAMP": signed["_bybit_timestamp"],
                 "X-BAPI-RECV-WINDOW": self._recv_window,
                 "Content-Type": "application/json",
             }
@@ -326,12 +328,18 @@ class HttpClient:
     # -------------------------------------------------------------------------
 
     def _build_url(self, path: str, params: Dict[str, str]) -> str:
-        """Build full URL with query string."""
+        """Build full URL with query string.
+
+        Keys prefixed with _bybit_ are internal auth fields and
+        are excluded from the URL query string.
+        """
         url = self._base_url + path
-        if params:
+        # Filter out internal auth fields (prefixed with underscore)
+        filtered = {k: v for k, v in params.items() if not k.startswith("_")}
+        if filtered:
             qs = "&".join(
                 f"{quote(str(k), safe='')}={quote(str(v), safe='')}"
-                for k, v in params.items()
+                for k, v in filtered.items()
             )
             return f"{url}?{qs}"
         return url
