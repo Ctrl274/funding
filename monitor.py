@@ -38,8 +38,7 @@ class MonitorLoop:
         self._scheduler = BackgroundScheduler()
         self._running = False
         self._current_positions: Dict = {}
-        self._attempted_this_cycle: set = set()  # symbols attempted in current settlement cycle
-        self._last_settlement_time: float = 0     # track cycle boundaries
+        self._attempted_this_cycle: Dict[str, str] = {}  # {symbol: result_summary} per cycle
         self._load_open_positions()
 
     def _load_open_positions(self):
@@ -86,8 +85,9 @@ class MonitorLoop:
             return
 
         if not self._is_near_settlement():
-            # Not near settlement — reset cycle tracking for next cycle
+            # Settlement window ended — send batch notification for any failures, then reset
             if self._attempted_this_cycle:
+                self._send_cycle_summary()
                 self._attempted_this_cycle.clear()
             logger.debug("Not within pre-settlement window, skipping")
             return
@@ -112,8 +112,19 @@ class MonitorLoop:
         logger.info(f"Found {len(new_opps)} new opportunities (cycle total: {len(self._attempted_this_cycle)} already tried): {[o.symbol for o in new_opps]}")
 
         for opp in new_opps:
-            self._attempted_this_cycle.add(opp.symbol)
             self._execute_opportunity(opp, all_rates)
+
+    def _send_cycle_summary(self):
+        """Send a single batch notification for all failed attempts in this cycle."""
+        failures = {sym: reason for sym, reason in self._attempted_this_cycle.items()
+                    if reason != "filled"}
+        if not failures:
+            return
+
+        lines = ["[Settlement Cycle Summary]"]
+        for sym, reason in failures.items():
+            lines.append(f"  {sym}: {reason}")
+        self._notifier.send("\n".join(lines))
 
     def _collect_rates(self) -> Dict:
         """Collect funding rates from all exchanges."""
@@ -238,27 +249,21 @@ class MonitorLoop:
         if quantity < 1:
             # Determine the skip reason
             if usdt_per_side <= 0:
-                reason = "Insufficient balance"
-                details = (
-                    f"usdt_per_side={usdt_per_side}, "
-                    f"balances={balances}, "
-                    f"price_a={price_a}, price_b={price_b}"
-                )
                 logger.warning(
                     f"Skipping {symbol}: insufficient balance "
                     f"(usdt_per_side={usdt_per_side}, balances={balances})"
                 )
-            else:
-                reason = "Position too small after calculation"
-                details = (
-                    f"usdt_per_side={usdt_per_side}, "
-                    f"quantity={quantity} (from qa={quantity_a}, qb={quantity_b}), "
-                    f"price_a={price_a}, price_b={price_b}"
+                self._attempted_this_cycle[symbol] = (
+                    f"Insufficient balance (balances={balances})"
                 )
+            else:
                 logger.warning(
                     f"Position too small for {symbol}: "
                     f"quantity={quantity}, usdt_per_side={usdt_per_side}, "
                     f"price_a={price_a}, price_b={price_b}"
+                )
+                self._attempted_this_cycle[symbol] = (
+                    f"Position too small (qty={quantity})"
                 )
             return
 
@@ -272,6 +277,7 @@ class MonitorLoop:
                 f"Position too small after clamping for {symbol} "
                 f"(quantity={quantity}, usdt_per_side={usdt_per_side})"
             )
+            self._attempted_this_cycle[symbol] = "Position too small after clamping"
             return
 
         logger.info(
@@ -328,15 +334,20 @@ class MonitorLoop:
             )
             logger.info(f"Trade recorded: {symbol} {result.status}")
 
-        # Only notify on final outcomes: filled or one-shot failures
-        # (skip/insufficient balance is logged only, no notification spam)
+        # Record result in cycle tracker and notify
         if result.status == "filled":
+            self._attempted_this_cycle[symbol] = "filled"
             self._notifier.send_arbitrage_result(opp, result)
-        elif result.status in ("failed", "partial_fill"):
-            logger.warning(
-                f"{symbol} arbitrage {result.status}: "
-                f"error_a={result.error_a}, error_b={result.error_b}"
-            )
+        else:
+            # Failed: record reason, will be batch-notified at cycle end
+            error_parts = []
+            if result.error_a:
+                error_parts.append(f"A: {result.error_a}")
+            if result.error_b:
+                error_parts.append(f"B: {result.error_b}")
+            reason = f"{result.status} — {', '.join(error_parts)}" if error_parts else result.status
+            self._attempted_this_cycle[symbol] = reason
+            logger.warning(f"{symbol} arbitrage failed: {reason}")
 
     def get_current_rates(self) -> Dict:
         """Get current rates (for Web UI)."""
