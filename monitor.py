@@ -51,7 +51,9 @@ class MonitorLoop:
                 "low_exchange": pos["low_exchange"],
                 "side_a": pos["side_a"],
                 "side_b": pos["side_b"],
-                "quantity": pos["quantity"],
+                "quantity": pos.get("quantity", 0),
+                "quantity_a": pos.get("quantity_a"),
+                "quantity_b": pos.get("quantity_b"),
                 "open_time": pos["open_time"],
             }
         if self._current_positions:
@@ -210,33 +212,75 @@ class MonitorLoop:
 
         usdt_per_side = self._strategy.calculate_position_size(symbol, price_a, balances)
 
-        # Get contract sizes from both adapters
+        # Calculate per-exchange quantities based on each adapter's contract size
         cs_a = adapter_a.get_contract_size(symbol)
         cs_b = adapter_b.get_contract_size(symbol)
 
-        # Use the larger contract_size to avoid exceeding either exchange's limits
-        contract_size = max(cs_a, cs_b)
+        quantity_a = self._strategy.contracts_from_usdt(usdt_per_side, price_a, cs_a)
+        quantity_b = self._strategy.contracts_from_usdt(usdt_per_side, price_b, cs_b)
 
-        quantity = self._strategy.contracts_from_usdt(usdt_per_side, price_a, contract_size)
+        # Both sides must use the same quantity for a matched arbitrage position.
+        # Use the smaller quantity to ensure neither side exceeds its USDT allocation.
+        quantity = min(quantity_a, quantity_b)
 
         if quantity < 1:
-            logger.info(f"Position too small for {symbol}")
+            # Determine the skip reason
+            if usdt_per_side <= 0:
+                reason = "Insufficient balance"
+                details = (
+                    f"usdt_per_side={usdt_per_side}, "
+                    f"balances={balances}, "
+                    f"price_a={price_a}, price_b={price_b}"
+                )
+                logger.warning(
+                    f"Skipping {symbol}: insufficient balance "
+                    f"(usdt_per_side={usdt_per_side}, balances={balances})"
+                )
+            else:
+                reason = "Position too small after calculation"
+                details = (
+                    f"usdt_per_side={usdt_per_side}, "
+                    f"quantity={quantity} (from qa={quantity_a}, qb={quantity_b}), "
+                    f"price_a={price_a}, price_b={price_b}"
+                )
+                logger.warning(
+                    f"Position too small for {symbol}: "
+                    f"quantity={quantity}, usdt_per_side={usdt_per_side}, "
+                    f"price_a={price_a}, price_b={price_b}"
+                )
+            self._notifier.send_skip_reason(opp, reason, details)
             return
 
-        # Clamp to exchange position limits
-        quantity = self._strategy.clamp_quantity(symbol, quantity, adapter_a)
+        # Clamp to the stricter of both exchange position limits
+        clamped_a = self._strategy.clamp_quantity(symbol, quantity, adapter_a)
+        clamped_b = self._strategy.clamp_quantity(symbol, quantity, adapter_b)
+        quantity = min(clamped_a, clamped_b)
+
         if quantity < 1:
-            logger.info(f"Position too small after clamping to exchange limits for {symbol}")
+            logger.warning(
+                f"Position too small after clamping for {symbol} "
+                f"(quantity={quantity}, usdt_per_side={usdt_per_side})"
+            )
+            self._notifier.send_skip_reason(
+                opp, "Position too small after exchange limit clamp",
+                f"quantity={quantity}, usdt_per_side={usdt_per_side}"
+            )
             return
 
-        # Place orders
+        logger.info(
+            f"{symbol} quantity: {quantity} "
+            f"(qa={quantity_a}, qb={quantity_b}, cs_a={cs_a}, cs_b={cs_b})"
+        )
+
+        # Place orders — both sides use the same quantity
         result = self._executor.execute_arbitrage(
             symbol=symbol,
             adapter_a=adapter_a,
             adapter_b=adapter_b,
             side_a=opp.side_a,
             side_b=opp.side_b,
-            quantity=quantity,
+            quantity_a=quantity,
+            quantity_b=quantity,
             price_a=price_a,
             price_b=price_b,
             order_type=self._config.strategy.order_type,
@@ -249,7 +293,9 @@ class MonitorLoop:
                 "low_exchange": opp.low_exchange,
                 "side_a": opp.side_a,
                 "side_b": opp.side_b,
-                "quantity": quantity,
+                "quantity": quantity_a,
+                "quantity_a": quantity_a,
+                "quantity_b": quantity_b,
                 "open_time": result.timestamp,
             }
             self._current_positions[symbol] = position
@@ -265,7 +311,9 @@ class MonitorLoop:
                 low_exchange=opp.low_exchange,
                 rate_diff=opp.rate_diff_percent,
                 result=result.status,
-                quantity=quantity,
+                quantity=quantity_a,
+                quantity_a=quantity_a,
+                quantity_b=quantity_b,
                 side_a=opp.side_a,
                 side_b=opp.side_b,
                 error_a=result.error_a,
@@ -285,14 +333,33 @@ class MonitorLoop:
         return self._current_positions
 
     def close_position(self, symbol: str):
-        """Close a position and update database."""
+        """Close a position by placing reverse orders on both exchanges."""
         if symbol not in self._current_positions:
             logger.warning(f"No open position for {symbol}")
             return
+
+        pos = self._current_positions[symbol]
+        close_errors = []
+
+        # Close on both exchanges
+        for ex_name in [pos["high_exchange"], pos["low_exchange"]]:
+            try:
+                adapter = self._adapters[ex_name]
+                adapter.close_position(symbol)
+                logger.info(f"Closed position on {ex_name} for {symbol}")
+            except Exception as e:
+                logger.error(f"Failed to close on {ex_name} for {symbol}: {e}", exc_info=True)
+                close_errors.append(f"{ex_name}: {e}")
+
+        # Remove from tracking
         self._current_positions.pop(symbol, None)
+
+        # Update database
         if self._db:
             self._db.close_position(symbol)
-            logger.info(f"Position closed in database: {symbol}")
+            close_result = "closed" if not close_errors else f"partial: {', '.join(close_errors)}"
+            self._db.update_trade_close(symbol, close_result)
+            logger.info(f"Position closed in database: {symbol} ({close_result})")
 
     def get_next_settlement(self) -> Optional[datetime]:
         """Get next settlement time from real API data."""
