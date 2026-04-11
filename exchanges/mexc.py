@@ -52,7 +52,8 @@ class MexcAdapter(ExchangeAdapter):
             resp.raise_for_status()
             data = resp.json()
             items = data.get("data", [])
-        except Exception:
+        except Exception as e:
+            logger.warning(f"mexc get_funding_rates failed: {e}")
             return result
 
         for item in items:
@@ -164,7 +165,9 @@ class MexcAdapter(ExchangeAdapter):
                 logger.info(
                     f"mexc market order placed: {symbol} {side} {quantity}, orderId={order_id}"
                 )
-            return order_id
+                return order_id
+            logger.warning(f"MEXC market order failed: {symbol} {side} {quantity} -- no order_id returned")
+            return None
         except Exception as e:
             logger.warning(
                 f"mexc market order failed: {symbol} {side} {quantity} {e}"
@@ -246,7 +249,10 @@ class MexcAdapter(ExchangeAdapter):
             if not pos:
                 return False
             close_side = "SELL" if pos["side"] == "BUY" else "BUY"
-            self.place_market_order(symbol, close_side, pos["quantity"])
+            order_id = self.place_market_order(symbol, close_side, pos["quantity"])
+            if not order_id:
+                logger.warning(f"mexc close_position failed: {symbol}")
+                return False
             logger.info(f"mexc position closed: {symbol}")
             return True
         except Exception as e:
@@ -302,8 +308,8 @@ class MexcAdapter(ExchangeAdapter):
                 max_qty = pos.get("max_position_size") or pos.get("max_open_order_size")
                 if max_qty is not None:
                     return float(max_qty)
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning(f"mexc get_max_position failed: {symbol} {e}")
         return None
 
     def get_contract_size(self, symbol: str) -> float:
