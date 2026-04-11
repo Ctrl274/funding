@@ -38,6 +38,8 @@ class MonitorLoop:
         self._scheduler = BackgroundScheduler()
         self._running = False
         self._current_positions: Dict = {}
+        self._attempted_this_cycle: set = set()  # symbols attempted in current settlement cycle
+        self._last_settlement_time: float = 0     # track cycle boundaries
         self._load_open_positions()
 
     def _load_open_positions(self):
@@ -84,6 +86,9 @@ class MonitorLoop:
             return
 
         if not self._is_near_settlement():
+            # Not near settlement — reset cycle tracking for next cycle
+            if self._attempted_this_cycle:
+                self._attempted_this_cycle.clear()
             logger.debug("Not within pre-settlement window, skipping")
             return
 
@@ -98,9 +103,16 @@ class MonitorLoop:
             logger.info("No arbitrage opportunities found")
             return
 
-        logger.info(f"Found {len(opportunities)} opportunities: {[o.symbol for o in opportunities]}")
+        # Filter out symbols already attempted in this settlement cycle
+        new_opps = [o for o in opportunities if o.symbol not in self._attempted_this_cycle]
+        if not new_opps:
+            logger.info(f"All {len(opportunities)} opportunities already attempted this cycle")
+            return
 
-        for opp in opportunities:
+        logger.info(f"Found {len(new_opps)} new opportunities (cycle total: {len(self._attempted_this_cycle)} already tried): {[o.symbol for o in new_opps]}")
+
+        for opp in new_opps:
+            self._attempted_this_cycle.add(opp.symbol)
             self._execute_opportunity(opp, all_rates)
 
     def _collect_rates(self) -> Dict:
@@ -248,7 +260,6 @@ class MonitorLoop:
                     f"quantity={quantity}, usdt_per_side={usdt_per_side}, "
                     f"price_a={price_a}, price_b={price_b}"
                 )
-            self._notifier.send_skip_reason(opp, reason, details)
             return
 
         # Clamp to the stricter of both exchange position limits
@@ -260,10 +271,6 @@ class MonitorLoop:
             logger.warning(
                 f"Position too small after clamping for {symbol} "
                 f"(quantity={quantity}, usdt_per_side={usdt_per_side})"
-            )
-            self._notifier.send_skip_reason(
-                opp, "Position too small after exchange limit clamp",
-                f"quantity={quantity}, usdt_per_side={usdt_per_side}"
             )
             return
 
@@ -293,9 +300,9 @@ class MonitorLoop:
                 "low_exchange": opp.low_exchange,
                 "side_a": opp.side_a,
                 "side_b": opp.side_b,
-                "quantity": quantity_a,
-                "quantity_a": quantity_a,
-                "quantity_b": quantity_b,
+                "quantity": quantity,
+                "quantity_a": quantity,
+                "quantity_b": quantity,
                 "open_time": result.timestamp,
             }
             self._current_positions[symbol] = position
@@ -311,9 +318,9 @@ class MonitorLoop:
                 low_exchange=opp.low_exchange,
                 rate_diff=opp.rate_diff_percent,
                 result=result.status,
-                quantity=quantity_a,
-                quantity_a=quantity_a,
-                quantity_b=quantity_b,
+                quantity=quantity,
+                quantity_a=quantity,
+                quantity_b=quantity,
                 side_a=opp.side_a,
                 side_b=opp.side_b,
                 error_a=result.error_a,
@@ -321,8 +328,15 @@ class MonitorLoop:
             )
             logger.info(f"Trade recorded: {symbol} {result.status}")
 
-        # Notify
-        self._notifier.send_arbitrage_result(opp, result)
+        # Only notify on final outcomes: filled or one-shot failures
+        # (skip/insufficient balance is logged only, no notification spam)
+        if result.status == "filled":
+            self._notifier.send_arbitrage_result(opp, result)
+        elif result.status in ("failed", "partial_fill"):
+            logger.warning(
+                f"{symbol} arbitrage {result.status}: "
+                f"error_a={result.error_a}, error_b={result.error_b}"
+            )
 
     def get_current_rates(self) -> Dict:
         """Get current rates (for Web UI)."""

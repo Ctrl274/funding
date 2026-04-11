@@ -44,7 +44,8 @@ class ExecutionEngine:
         adapter_b,
         side_a: str,
         side_b: str,
-        quantity: int,
+        quantity_a: int,
+        quantity_b: int,
         price_a: float,
         price_b: float,
         order_type: str = "limit",
@@ -56,9 +57,9 @@ class ExecutionEngine:
         """
         if order_type == "market":
             return self._execute_market(symbol, adapter_a, adapter_b,
-                                        side_a, side_b, quantity, price_a, price_b)
+                                        side_a, side_b, quantity_a, quantity_b, price_a, price_b)
         return self._execute_limit(symbol, adapter_a, adapter_b,
-                                   side_a, side_b, quantity, price_a, price_b)
+                                   side_a, side_b, quantity_a, quantity_b, price_a, price_b)
 
     def _execute_market(
         self,
@@ -67,7 +68,8 @@ class ExecutionEngine:
         adapter_b,
         side_a: str,
         side_b: str,
-        quantity: int,
+        quantity_a: int,
+        quantity_b: int,
         price_a: float,
         price_b: float,
     ) -> OrderResult:
@@ -80,16 +82,20 @@ class ExecutionEngine:
         like Bybit (which requires special params for closed orders and has a
         500-order history limit).
         """
-        order_a_id = adapter_a.place_market_order(symbol, side_a, quantity)
-        order_b_id = adapter_b.place_market_order(symbol, side_b, quantity)
+        order_a_id = adapter_a.place_market_order(symbol, side_a, quantity_a)
+        order_b_id = adapter_b.place_market_order(symbol, side_b, quantity_b)
 
         if order_a_id is None:
             if order_b_id:
-                adapter_b.cancel_order(symbol, order_b_id)
+                # B submitted but A failed — B's market order likely already filled,
+                # must close position instead of cancel
+                self._safely_unwind(adapter_b, symbol, order_b_id)
             return OrderResult(status="failed", error_a="order_a_submit_failed")
 
         if order_b_id is None:
-            adapter_a.cancel_order(symbol, order_a_id)
+            # A submitted but B failed — A's market order likely already filled,
+            # must close position instead of cancel
+            self._safely_unwind(adapter_a, symbol, order_a_id)
             return OrderResult(
                 status="failed",
                 order_a_id=order_a_id,
@@ -118,7 +124,8 @@ class ExecutionEngine:
                 )
 
             if has_pos_a and not has_pos_b:
-                adapter_a.cancel_order(symbol, order_a_id)
+                # A filled but B didn't — close A's position to unwind
+                self._safely_unwind(adapter_a, symbol, order_a_id)
                 return OrderResult(
                     status="partial_fill",
                     order_a_id=order_a_id,
@@ -126,7 +133,8 @@ class ExecutionEngine:
                     error_b="no_position",
                 )
             if has_pos_b and not has_pos_a:
-                adapter_b.cancel_order(symbol, order_b_id)
+                # B filled but A didn't — close B's position to unwind
+                self._safely_unwind(adapter_b, symbol, order_b_id)
                 return OrderResult(
                     status="partial_fill",
                     order_a_id=order_a_id,
@@ -137,14 +145,31 @@ class ExecutionEngine:
             # Neither has position yet — wait and retry
             time.sleep(self.poll_interval)
 
-        # Timeout — cancel any open orders
-        adapter_a.cancel_order(symbol, order_a_id)
-        adapter_b.cancel_order(symbol, order_b_id)
+        # Timeout — cancel open orders and close any positions
+        self._safely_unwind(adapter_a, symbol, order_a_id)
+        self._safely_unwind(adapter_b, symbol, order_b_id)
         return OrderResult(
             status="timeout",
             order_a_id=order_a_id,
             order_b_id=order_b_id,
         )
+
+    def _safely_unwind(self, adapter, symbol: str, order_id: str = None):
+        """Safely unwind a position after a partial fill scenario.
+
+        For market orders that may have already filled:
+        1. Try cancel_order first (works if order is still open)
+        2. If that fails, try close_position (handles already-filled orders)
+        """
+        if order_id:
+            try:
+                adapter.cancel_order(symbol, order_id)
+            except Exception:
+                pass
+        try:
+            adapter.close_position(symbol)
+        except Exception:
+            pass
 
     def _execute_limit(
         self,
@@ -153,13 +178,14 @@ class ExecutionEngine:
         adapter_b,
         side_a: str,
         side_b: str,
-        quantity: int,
+        quantity_a: int,
+        quantity_b: int,
         price_a: float,
         price_b: float,
     ) -> OrderResult:
         """Execute arbitrage using FOK limit orders."""
-        order_a_id = adapter_a.place_fok_order(symbol, side_a, quantity, price_a)
-        order_b_id = adapter_b.place_fok_order(symbol, side_b, quantity, price_b)
+        order_a_id = adapter_a.place_fok_order(symbol, side_a, quantity_a, price_a)
+        order_b_id = adapter_b.place_fok_order(symbol, side_b, quantity_b, price_b)
 
         if order_a_id is None:
             if order_b_id:
