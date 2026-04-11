@@ -89,31 +89,39 @@ class HttpClient:
     ) -> dict:
         """Send a signed POST request.
 
-        Parameters
-        ----------
-        path : str
-            API endpoint path.
-        params : dict, optional
-            Query parameters to include in the URL.
-        body : str
-            JSON request body (empty string for no body).
-
-        Returns
-        -------
-        dict
-            Parsed JSON response.
-
-        Raises
-        ------
-        ExchangeApiError
-            If the exchange returns a non-successful response.
+        For Bybit, params are sent as JSON body (not query string).
+        For all other exchanges, params go in the query string.
         """
         params = params or {}
         signed = self._sign_request(path, params, body)
-        url = self._build_url(path, signed)
-        resp = self._session.post(
-            url, headers=self._headers_post(signed, body), data=body or None, timeout=10
-        )
+
+        if self._sign_mode == "bybit":
+            # Bybit POST: params as JSON body, no query string
+            import json as _json
+            # Filter out internal auth fields
+            body_params = {k: v for k, v in signed.items() if not k.startswith("_")}
+            body_str = _json.dumps(body_params, separators=(",", ":"))
+            # Re-sign with the actual body
+            ts = signed.get("_bybit_timestamp", str(int(time.time() * 1000)))
+            sign_str = ts + self._api_key + self._recv_window + body_str
+            sig = hmac.new(
+                self._api_secret.encode(), sign_str.encode(), hashlib.sha256
+            ).hexdigest()
+            headers = {
+                "X-BAPI-API-KEY": self._api_key,
+                "X-BAPI-SIGN": sig,
+                "X-BAPI-SIGN-TYPE": "2",
+                "X-BAPI-TIMESTAMP": ts,
+                "X-BAPI-RECV-WINDOW": self._recv_window,
+                "Content-Type": "application/json",
+            }
+            url = self._base_url + path
+            resp = self._session.post(url, headers=headers, data=body_str, timeout=10)
+        else:
+            url = self._build_url(path, signed)
+            resp = self._session.post(
+                url, headers=self._headers_post(signed, body), data=body or None, timeout=10
+            )
         return self._parse_response(resp)
 
     def signed_delete(

@@ -91,9 +91,9 @@ def test_place_fok_order_success():
     assert order_id == "bybit_order_1"
     # Verify the correct params were passed
     call_params = mock_http.signed_post.call_args
-    assert call_params[0][0] == "/v5/order/place"
+    assert call_params[0][0] == "/v5/order/create"
     assert call_params[1]["params"]["symbol"] == "BTCUSDT"
-    assert call_params[1]["params"]["side"] == "SELL"
+    assert call_params[1]["params"]["side"] == "Sell"
     assert call_params[1]["params"]["timeInForce"] == "FOK"
 
 
@@ -250,18 +250,29 @@ def test_get_position_no_position():
 
 def test_close_position():
     mock_http = MagicMock()
-    mock_http.signed_post.return_value = {"retCode": 0}
+    # get_position -> signed_get returns a position
+    mock_http.signed_get.return_value = {
+        "retCode": 0,
+        "result": {
+            "list": [{
+                "symbol": "BTCUSDT",
+                "size": "1",
+                "side": "Buy",
+                "avgPrice": "50000",
+            }]
+        }
+    }
+    # place_market_order -> signed_post returns order ID
+    mock_http.signed_post.return_value = {
+        "retCode": 0,
+        "result": {"orderId": "close-order-1"}
+    }
 
     with patch("exchanges.bybit.HttpClient", return_value=mock_http):
         adapter = BybitAdapter("key", "secret")
         result = adapter.close_position("BTC-USDT")
 
     assert result is True
-    mock_http.signed_post.assert_called_once()
-    call_params = mock_http.signed_post.call_args
-    assert call_params[0][0] == "/v5/position/close"
-    assert call_params[1]["params"]["category"] == "linear"
-    assert call_params[1]["params"]["symbol"] == "BTCUSDT"
 
 
 def test_get_ticker_price():

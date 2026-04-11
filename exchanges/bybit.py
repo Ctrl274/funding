@@ -170,11 +170,11 @@ class BybitAdapter(ExchangeAdapter):
         logger = logging.getLogger(__name__)
         try:
             data = self._http.signed_post(
-                "/v5/order/place",
+                "/v5/order/create",
                 params={
                     "category": "linear",
                     "symbol": self._to_bybit_symbol(symbol),
-                    "side": side.upper(),
+                    "side": side.capitalize(),
                     "orderType": "Limit",
                     "qty": str(quantity),
                     "price": str(price),
@@ -207,11 +207,11 @@ class BybitAdapter(ExchangeAdapter):
         logger = logging.getLogger(__name__)
         try:
             data = self._http.signed_post(
-                "/v5/order/place",
+                "/v5/order/create",
                 params={
                     "category": "linear",
                     "symbol": self._to_bybit_symbol(symbol),
-                    "side": side.upper(),
+                    "side": side.capitalize(),
                     "orderType": "Market",
                     "qty": str(quantity),
                 },
@@ -298,18 +298,19 @@ class BybitAdapter(ExchangeAdapter):
             return None
 
     def close_position(self, symbol: str) -> bool:
-        """Close position via V5 position/close."""
+        """Close position via reverse market order (Demo API has no /v5/position/close)."""
         logger = logging.getLogger(__name__)
         try:
-            data = self._http.signed_post(
-                "/v5/position/close",
-                params={
-                    "category": "linear",
-                    "symbol": self._to_bybit_symbol(symbol),
-                },
-            )
+            pos = self.get_position(symbol)
+            if not pos:
+                return False
+            close_side = "SELL" if pos["side"] == "BUY" else "BUY"
+            order_id = self.place_market_order(symbol, close_side.lower(), pos["quantity"])
+            if not order_id:
+                logger.warning(f"bybit close_position failed: {symbol}")
+                return False
             logger.info(f"bybit position closed: {symbol}")
-            return data.get("retCode") == 0
+            return True
         except Exception as e:
             logger.warning(f"bybit close_position failed: {symbol} {e}")
             return False
