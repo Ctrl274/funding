@@ -17,6 +17,7 @@ class OrderResult:
     fill_price_b: Optional[float] = None
     error_a: Optional[str] = None
     error_b: Optional[str] = None
+    profit: Optional[float] = None  # estimated profit on fill: rate_diff * quantity * price_a / 100
     timestamp: float = field(default_factory=time.time)
 
 
@@ -49,17 +50,20 @@ class ExecutionEngine:
         price_a: float,
         price_b: float,
         order_type: str = "limit",
+        rate_diff: float = 0.0,
     ) -> OrderResult:
         """
         Execute arbitrage.
         order_type: "limit" (IOC/FOK) or "market"
-        Returns OrderResult.
+        rate_diff: funding rate difference in percent (e.g. 0.02 for 0.02%)
+        Returns OrderResult with computed profit on fill.
         """
+        profit = rate_diff * quantity_a * price_a / 100 if rate_diff else None
         if order_type == "market":
             return self._execute_market(symbol, adapter_a, adapter_b,
-                                        side_a, side_b, quantity_a, quantity_b, price_a, price_b)
+                                        side_a, side_b, quantity_a, quantity_b, price_a, price_b, profit)
         return self._execute_limit(symbol, adapter_a, adapter_b,
-                                   side_a, side_b, quantity_a, quantity_b, price_a, price_b)
+                                   side_a, side_b, quantity_a, quantity_b, price_a, price_b, profit)
 
     def _execute_market(
         self,
@@ -72,6 +76,7 @@ class ExecutionEngine:
         quantity_b: int,
         price_a: float,
         price_b: float,
+        profit: Optional[float] = None,
     ) -> OrderResult:
         """
         Execute arbitrage using market orders.
@@ -121,6 +126,7 @@ class ExecutionEngine:
                     order_b_id=order_b_id,
                     fill_price_a=price_a,
                     fill_price_b=price_b,
+                    profit=profit,
                 )
 
             if has_pos_a and not has_pos_b:
@@ -131,6 +137,7 @@ class ExecutionEngine:
                     order_a_id=order_a_id,
                     order_b_id=order_b_id,
                     error_b="no_position",
+                    profit=profit,
                 )
             if has_pos_b and not has_pos_a:
                 # B filled but A didn't — close B's position to unwind
@@ -140,6 +147,7 @@ class ExecutionEngine:
                     order_a_id=order_a_id,
                     order_b_id=order_b_id,
                     error_a="no_position",
+                    profit=profit,
                 )
 
             # Neither has position yet — wait and retry
@@ -182,6 +190,7 @@ class ExecutionEngine:
         quantity_b: int,
         price_a: float,
         price_b: float,
+        profit: Optional[float] = None,
     ) -> OrderResult:
         """Execute arbitrage using FOK limit orders."""
         order_a_id = adapter_a.place_fok_order(symbol, side_a, quantity_a, price_a)
@@ -218,6 +227,7 @@ class ExecutionEngine:
                         order_a_id=order_a_id,
                         order_b_id=order_b_id,
                         error_a=f"status={status_a}",
+                        profit=profit,
                     )
 
             if not order_b_filled:
@@ -231,6 +241,7 @@ class ExecutionEngine:
                         order_a_id=order_a_id,
                         order_b_id=order_b_id,
                         error_b=f"status={status_b}",
+                        profit=profit,
                     )
 
             # Check if one side is filled and the other has failed/been cancelled
@@ -243,6 +254,7 @@ class ExecutionEngine:
                         order_a_id=order_a_id,
                         order_b_id=order_b_id,
                         error_b=f"status={status_b}",
+                        profit=profit,
                     )
             if order_b_filled and not order_a_filled:
                 status_a = adapter_a.get_order_status(symbol, order_a_id)
@@ -253,6 +265,7 @@ class ExecutionEngine:
                         order_a_id=order_a_id,
                         order_b_id=order_b_id,
                         error_a=f"status={status_a}",
+                        profit=profit,
                     )
 
             if order_a_filled and order_b_filled:
@@ -262,6 +275,7 @@ class ExecutionEngine:
                     order_b_id=order_b_id,
                     fill_price_a=price_a,
                     fill_price_b=price_b,
+                    profit=profit,
                 )
 
             time.sleep(self.poll_interval)

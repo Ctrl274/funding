@@ -4,32 +4,20 @@ from exchanges.bydfi import BydfiAdapter
 
 
 def test_get_funding_rates():
-    # Mock two endpoints: ticker (all symbols) + funding_rate (per symbol)
-    def side_effect(url, **kwargs):
-        m = MagicMock()
-        if "ticker" in url:
-            m.status_code = 200
-            m.raise_for_status = MagicMock()
-            m.json.return_value = {
-                "data": [
-                    {"symbol": "BTC-USDT"},
-                    {"symbol": "ETH-USDT"},
-                    {"symbol": "BTC-USD"},
-                ]
-            }
-        else:
-            m.status_code = 200
-            m.raise_for_status = MagicMock()
-            sym = kwargs.get("params", {}).get("symbol", "")
-            rates = {
-                "BTC-USDT": {"lastFundingRate": "0.00010000", "nextFundingTime": 1700000000000},
-                "ETH-USDT": {"lastFundingRate": "-0.00003000", "nextFundingTime": 1700000000000},
-                "BTC-USD": {"lastFundingRate": "0.00005000", "nextFundingTime": 1700000000000},
-            }
-            m.json.return_value = {"code": 200, "data": rates.get(sym, {})}
-        return m
+    # Mock the batch funding rate endpoint
+    mock_resp = MagicMock()
+    mock_resp.status_code = 200
+    mock_resp.raise_for_status = MagicMock()
+    mock_resp.json.return_value = {
+        "code": 200,
+        "data": [
+            {"symbol": "BTC-USDT", "fundRate": 0.0001, "feeTime": 1700000000000},
+            {"symbol": "ETH-USDT", "fundRate": -0.00003, "feeTime": 1700000000000},
+            {"symbol": "BTC-USD", "fundRate": 0.00005, "feeTime": 1700000000000},
+        ]
+    }
 
-    with patch("exchanges.bydfi.requests.get", side_effect=side_effect):
+    with patch("exchanges.bydfi.requests.get", return_value=mock_resp):
         adapter = BydfiAdapter("key", "secret")
         result = adapter.get_funding_rates()
 
@@ -45,12 +33,12 @@ def test_get_account_balance():
     mock_resp.status_code = 200
     mock_resp.json.return_value = {
         "data": [
-            {"coin": "USDT", "available": "4000.50"},
-            {"coin": "BTC", "available": "0.5"},
+            {"account": "UMFUTURE", "asset": "USDT", "available": "4000.50"},
+            {"account": "UMFUTURE", "asset": "BTC", "available": "0.5"},
         ]
     }
 
-    with patch("requests.get", return_value=mock_resp):
+    with patch("exchanges.bydfi.requests.get", return_value=mock_resp):
         adapter = BydfiAdapter("key", "secret")
         balance = adapter.get_account_balance()
 
@@ -92,11 +80,25 @@ def test_cancel_order():
 
 
 def test_get_order_status_filled():
-    mock_resp = MagicMock()
-    mock_resp.status_code = 200
-    mock_resp.json.return_value = {"data": {"status": "filled"}}
+    """open_order returns code!=200, falls back to get_position."""
+    mock_open_order = MagicMock()
+    mock_open_order.status_code = 200
+    mock_open_order.json.return_value = {"code": 101103, "message": "IP restricted"}
 
-    with patch("requests.get", return_value=mock_resp):
+    mock_position = MagicMock()
+    mock_position.status_code = 200
+    mock_position.json.return_value = {
+        "code": 200, "data": [
+            {"volume": "5", "avgPrice": "50000", "side": "BUY"},
+        ]
+    }
+
+    def side_effect(*args, **kwargs):
+        if "open_order" in args[0]:
+            return mock_open_order
+        return mock_position
+
+    with patch("exchanges.bydfi.requests.get", side_effect=side_effect):
         adapter = BydfiAdapter("key", "secret")
         status = adapter.get_order_status("BTC-USDT", "order1")
 

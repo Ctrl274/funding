@@ -119,3 +119,53 @@ def test_get_order_status_returns_unknown_on_api_error():
         status = adapter.get_order_status("BTC-USDT", "order123")
 
     assert status == "unknown"
+
+
+def test_close_position_timeout_but_order_pending():
+    """Poll times out but order is still NEW -> treat as success."""
+    # Mock get_position so we skip the position lookup and have a known entry_price
+    mock_pos = {"quantity": 1.0, "side": "BUY", "entry_price": 50000.0}
+    mock_order_get = MagicMock()
+    mock_order_get.raise_for_status = MagicMock()
+    mock_order_get.json.return_value = {
+        "orderId": 12345,
+        "symbol": "BTCUSDT",
+        "status": "NEW",
+        "fills": [],
+    }
+    mock_post = MagicMock()
+    mock_post.raise_for_status = MagicMock()
+    mock_post.json.return_value = {"orderId": 12345}
+
+    with patch.object(BinanceAdapter, "get_position", return_value=mock_pos), \
+         patch("requests.post", return_value=mock_post), \
+         patch("requests.get", return_value=mock_order_get):
+        adapter = BinanceAdapter("key", "secret")
+        result = adapter.close_position("BTC-USDT")
+
+    assert result.success is True
+    assert result.close_price_a == 50000.0  # entry price as proxy
+
+
+def test_close_position_timeout_and_order_cancelled():
+    """Poll times out and order was cancelled -> return failure."""
+    mock_pos = {"quantity": 1.0, "side": "BUY", "entry_price": 50000.0}
+    mock_order_get = MagicMock()
+    mock_order_get.raise_for_status = MagicMock()
+    mock_order_get.json.return_value = {
+        "orderId": 12345,
+        "symbol": "BTCUSDT",
+        "status": "CANCELLED",
+        "fills": [],
+    }
+    mock_post = MagicMock()
+    mock_post.raise_for_status = MagicMock()
+    mock_post.json.return_value = {"orderId": 12345}
+
+    with patch.object(BinanceAdapter, "get_position", return_value=mock_pos), \
+         patch("requests.post", return_value=mock_post), \
+         patch("requests.get", return_value=mock_order_get):
+        adapter = BinanceAdapter("key", "secret")
+        result = adapter.close_position("BTC-USDT")
+
+    assert result.success is False

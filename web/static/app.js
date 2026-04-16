@@ -80,7 +80,7 @@ function refreshRates() {
             return;
         }
         var allEx = ["binance", "bybit", "bydfi", "mexc"];
-        var html = "";
+        var items = [];
         for (var i = 0; i < rows.length; i++) {
             var row = rows[i];
             var rates = [];
@@ -109,6 +109,8 @@ function refreshRates() {
             var minRate = Math.min.apply(null, rates.map(function(r) { return r.val; }));
             var diff = maxRate - minRate;
 
+            var nearestTs = settlements.length > 0 ? Math.min.apply(null, settlements) : Infinity;
+
             var fullCells = "";
             for (var k = 0; k < allEx.length; k++) {
                 var ex2 = allEx[k];
@@ -126,20 +128,27 @@ function refreshRates() {
 
             var settlementStr = "-";
             if (settlements.length > 0) {
-                var nearestTs = Math.min.apply(null, settlements);
                 var remaining = Math.max(0, Math.floor(nearestTs - Date.now() / 1000));
                 var mm = Math.floor(remaining / 60);
                 var ss = remaining % 60;
                 settlementStr = mm + "m " + ss + "s";
             }
 
-            var rowClass = diff >= 0.01 ? " class='highlight'" : "";
-            html += "<tr" + rowClass + ">" +
+            items.push({ nearestTs: nearestTs, diff: diff, html: "<tr" + (diff >= 0.01 ? " class='highlight'" : "") + ">" +
                 "<td>" + escapeHtml(row.symbol) + "</td>" +
                 fullCells +
                 "<td class='" + (diff >= 0.01 ? "positive" : "") + "'>" + diff.toFixed(4) + "%</td>" +
                 "<td>" + escapeHtml(settlementStr) + "</td>" +
-                "</tr>";
+                "</tr>" });
+        }
+        // Sort: nearest settlement first, then by diff descending
+        items.sort(function(a, b) {
+            if (a.nearestTs !== b.nearestTs) return a.nearestTs - b.nearestTs;
+            return b.diff - a.diff;
+        });
+        var html = "";
+        for (var x = 0; x < items.length; x++) {
+            html += items[x].html;
         }
         tbody.innerHTML = html || "<tr><td colspan='7'><div class='empty-state'><div class='empty-text'>" + escapeHtml(I18N.t("empty_rates_filter")) + "</div></div></td></tr>";
     });
@@ -151,19 +160,23 @@ function refreshPositions() {
         var tbody = document.getElementById("positions-body");
         if (!tbody) return;
         if (!positions || positions.length === 0) {
-            tbody.innerHTML = "<tr><td colspan='6'><div class='empty-state'><div class='empty-text'>" + escapeHtml(I18N.t("empty_positions")) + "</div></div></td></tr>";
+            tbody.innerHTML = "<tr><td colspan='7'><div class='empty-state'><div class='empty-text'>" + escapeHtml(I18N.t("empty_positions")) + "</div></div></td></tr>";
             return;
         }
         var html = "";
         for (var i = 0; i < positions.length; i++) {
             var p = positions[i];
-            var openTime = new Date(p.open_time).toLocaleString();
+            // open_time is Unix timestamp in seconds (float), Date needs milliseconds
+            var openTime = new Date(parseFloat(p.open_time) * 1000).toLocaleString();
             var safeSymbol = escapeHtml(p.symbol);
+            var qa = p.quantity_a != null ? p.quantity_a : p.quantity;
+            var qb = p.quantity_b != null ? p.quantity_b : "-";
             html += "<tr>" +
                 "<td>" + safeSymbol + "</td>" +
                 "<td>" + escapeHtml(p.high_exchange) + " (" + escapeHtml(p.side_a) + ")</td>" +
                 "<td>" + escapeHtml(p.low_exchange) + " (" + escapeHtml(p.side_b) + ")</td>" +
-                "<td>" + escapeHtml(p.quantity) + "</td>" +
+                "<td>" + escapeHtml(qa) + "</td>" +
+                "<td>" + escapeHtml(qb) + "</td>" +
                 "<td>" + escapeHtml(openTime) + "</td>" +
                 "<td><button data-symbol=\"" + safeSymbol + "\" class=\"close-btn\">" + escapeHtml(I18N.t("btn_close")) + "</button></td>" +
                 "</tr>";
@@ -186,10 +199,25 @@ function closePosition(symbol, btn) {
         btn.textContent = I18N.t("btn_closing");
         btn.disabled = true;
     }
-    api("/api/positions/" + symbol + "/close", { method: "POST" }).then(function() {
+    api("/api/positions/" + symbol + "/close", { method: "POST" }).then(function(data) {
         refreshPositions();
         refreshStatus();
-        showToast(I18N.t("toast_position_closed", { symbol: symbol }), "success");
+        // Show result based on actual exchange status
+        if (data.status === "closed") {
+            showToast(I18N.t("toast_position_closed", { symbol: symbol }), "success");
+        } else if (data.status === "partial") {
+            var failed = [];
+            var results = data.close_results || {};
+            for (var ex in results) {
+                if (!results[ex].success) {
+                    failed.push(ex);
+                }
+            }
+            var detail = failed.length ? " (" + failed.join(", ") + " failed)" : "";
+            showToast(I18N.t("toast_position_closed_partial", { symbol: symbol }) + detail, "warning");
+        } else {
+            showToast(I18N.t("toast_close_failed", { symbol: symbol }), "error");
+        }
     }).catch(function() {
         if (btn) {
             btn.classList.remove("loading");
@@ -221,7 +249,7 @@ function renderHistoryTable(history) {
     var tbody = document.getElementById("history-body");
     if (!tbody) return;
     if (!history || history.length === 0) {
-        tbody.innerHTML = "<tr><td colspan='6'><div class='empty-state'><div class='empty-text'>" + escapeHtml(I18N.t("empty_history")) + "</div></div></td></tr>";
+        tbody.innerHTML = "<tr><td colspan='7'><div class='empty-state'><div class='empty-text'>" + escapeHtml(I18N.t("empty_history")) + "</div></div></td></tr>";
         return;
     }
     var html = "";
@@ -229,13 +257,18 @@ function renderHistoryTable(history) {
         var h = history[i];
         var profit = h.profit !== null ? "$" + parseFloat(h.profit).toFixed(2) : "-";
         var profitCls = h.profit > 0 ? "positive" : h.profit < 0 ? "negative" : "";
+        var realized = h.realized_pnl !== null ? "$" + parseFloat(h.realized_pnl).toFixed(2) : "-";
+        var realizedCls = h.realized_pnl > 0 ? "positive" : h.realized_pnl < 0 ? "negative" : "";
+        var closeTime = h.close_time ? escapeHtml(h.close_time) : "-";
         html += "<tr>" +
             "<td>" + escapeHtml(h.created_at) + "</td>" +
             "<td>" + escapeHtml(h.symbol) + "</td>" +
             "<td>" + escapeHtml(h.high_exchange) + "-" + escapeHtml(h.low_exchange) + "</td>" +
             "<td class='" + (parseFloat(h.rate_diff) > 0 ? "positive" : h.rate_diff < 0 ? "negative" : "") + "'>" + parseFloat(h.rate_diff).toFixed(4) + "%</td>" +
             "<td>" + escapeHtml(h.result) + "</td>" +
+            "<td>" + closeTime + "</td>" +
             "<td class='" + profitCls + "'>" + profit + "</td>" +
+            "<td class='" + realizedCls + "'>" + realized + "</td>" +
             "</tr>";
     }
     tbody.innerHTML = html;
@@ -285,6 +318,9 @@ function loadConfig() {
         setVal("position-value", cfg.strategy ? cfg.strategy.position_value : 1000);
         setVal("position-percent", cfg.strategy ? cfg.strategy.position_percent : 5);
         setVal("leverage", cfg.strategy ? cfg.strategy.leverage : 5);
+        setVal("pre-open-seconds", cfg.strategy ? cfg.strategy.pre_open_seconds : 15);
+        setVal("pre-settlement-seconds", cfg.strategy ? cfg.strategy.pre_settlement_seconds : 5);
+        setVal("post-settlement-close-seconds", cfg.strategy ? cfg.strategy.post_settlement_close_seconds : 2);
         var modeEl = document.getElementById("position-mode");
         if (modeEl && cfg.strategy) modeEl.value = cfg.strategy.position_mode || "fixed";
         var orderEl = document.getElementById("order-type");
@@ -314,6 +350,9 @@ function saveConfig(e) {
             order_type: form.querySelector("#order-type").value,
             position_percent: parseFloat(form.querySelector("#position-percent").value),
             leverage: parseInt(form.querySelector("#leverage").value, 10),
+            pre_open_seconds: parseInt(form.querySelector("#pre-open-seconds").value, 10),
+            pre_settlement_seconds: parseInt(form.querySelector("#pre-settlement-seconds").value, 10),
+            post_settlement_close_seconds: parseInt(form.querySelector("#post-settlement-close-seconds").value, 10),
         },
         notification: {
             lark_webhook: form.querySelector("#lark-webhook").value,

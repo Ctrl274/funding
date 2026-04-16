@@ -3,7 +3,9 @@ Monitor Loop.
 Periodically polls funding rates, checks time windows, and triggers arbitrage strategy.
 """
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
+
+TZ_UTC8 = timezone(timedelta(hours=8))
 from typing import Dict, List, Optional
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.interval import IntervalTrigger
@@ -39,6 +41,10 @@ class MonitorLoop:
         self._running = False
         self._current_positions: Dict = {}
         self._attempted_this_cycle: Dict[str, str] = {}  # {symbol: result_summary} per cycle
+        self._next_settlement_ts: Optional[int] = None        # tracks upcoming settlement
+        self._most_recent_settled_ts: Optional[int] = None  # tracks most recent past settlement
+        self._in_close: bool = False                      # prevents re-entrant close during auto-close
+        self._closing: Dict[str, bool] = {}              # {symbol: True} while close is in progress
         self._load_open_positions()
 
     def _load_open_positions(self):
@@ -56,6 +62,7 @@ class MonitorLoop:
                 "quantity_a": pos.get("quantity_a"),
                 "quantity_b": pos.get("quantity_b"),
                 "open_time": pos["open_time"],
+                "target_settlement": pos.get("target_settlement"),
             }
         if self._current_positions:
             logger.info(f"Loaded {len(self._current_positions)} open positions from database")
@@ -84,14 +91,35 @@ class MonitorLoop:
         if not self._config.monitor.enabled:
             return
 
+        import time
+        post_close_seconds = self._config.strategy.post_settlement_close_seconds
+        now_ts = time.time()
+
+        # Check if we are in the auto-close window (post-settlement)
+        is_close_window = False
+        if self._most_recent_settled_ts:
+            time_since = now_ts - self._most_recent_settled_ts
+            if time_since >= post_close_seconds:
+                is_close_window = True
+
         if not self._is_near_settlement():
-            # Settlement window ended — send batch notification for any failures, then reset
-            if self._attempted_this_cycle:
-                self._send_cycle_summary()
-                self._attempted_this_cycle.clear()
-            logger.debug("Not within pre-settlement window, skipping")
+            # Outside both windows — cycle reset already handled in _is_near_settlement
+            logger.debug("Not within open/close window, skipping")
             return
 
+        if is_close_window:
+            # Auto-close window: close all open positions
+            if self._in_close:
+                logger.debug("Auto-close already in progress, skipping")
+                return
+            self._in_close = True
+            try:
+                self._auto_close_positions()
+            finally:
+                self._in_close = False
+            return
+
+        # === Open window: scan for opportunities ===
         logger.info("Scanning funding rates...")
         all_rates = self._collect_rates()
         if not all_rates:
@@ -105,6 +133,8 @@ class MonitorLoop:
 
         # Filter out symbols already attempted in this settlement cycle
         new_opps = [o for o in opportunities if o.symbol not in self._attempted_this_cycle]
+        # Also filter out symbols that already have an open position
+        new_opps = [o for o in new_opps if o.symbol not in self._current_positions]
         if not new_opps:
             logger.info(f"All {len(opportunities)} opportunities already attempted this cycle")
             return
@@ -113,6 +143,15 @@ class MonitorLoop:
 
         for opp in new_opps:
             self._execute_opportunity(opp, all_rates)
+
+    def _auto_close_positions(self):
+        """Close all open positions during the post-settlement close window."""
+        if not self._current_positions:
+            return
+        symbols = list(self._current_positions.keys())
+        logger.info(f"Auto-close window: closing {len(symbols)} positions: {symbols}")
+        for symbol in symbols:
+            self.close_position(symbol)
 
     def _send_cycle_summary(self):
         """Send a single batch notification for all failed attempts in this cycle."""
@@ -170,25 +209,56 @@ class MonitorLoop:
         Uses actual next_settlement timestamps from exchange APIs,
         supporting any funding interval (1h, 2h, 4h, 8h, etc.).
         Falls back to time_windows if no rates are available.
+        Also tracks the current settlement cycle and resets _attempted_this_cycle
+        when a new settlement cycle begins.
         """
         import time
         pre_seconds = self._config.strategy.pre_settlement_seconds
+        pre_open_seconds = self._config.strategy.pre_open_seconds
+        post_close_seconds = self._config.strategy.post_settlement_close_seconds
         now_ts = time.time()
 
-        # Quick check: collect rates and compare next_settlement
+        # Find nearest upcoming settlement across all exchanges
+        nearest_settlement_ts = None
         for name, adapter in self._adapters.items():
             try:
                 rates = adapter.get_funding_rates()
                 for fr in rates.values():
-                    if fr.next_settlement > 0:
-                        time_to_settlement = fr.next_settlement - now_ts
-                        if 0 < time_to_settlement <= pre_seconds:
-                            return True
+                    if fr.next_settlement > now_ts:
+                        if nearest_settlement_ts is None or fr.next_settlement < nearest_settlement_ts:
+                            nearest_settlement_ts = fr.next_settlement
             except Exception:
                 pass
 
-        # Fallback: use time window if rate fetch fails
-        return self._is_within_time_window()
+        # If no upcoming settlement from API, fall back to time window
+        if nearest_settlement_ts is None:
+            return self._is_within_time_window()
+
+        # Detect cycle change: if nearest upcoming settlement is NEWER than tracked,
+        # it means settlement passed and a new cycle began
+        if self._next_settlement_ts is not None and nearest_settlement_ts > self._next_settlement_ts:
+            # Settlement cycle changed — send summary for old cycle, reset
+            if self._attempted_this_cycle:
+                self._send_cycle_summary()
+                self._attempted_this_cycle.clear()
+            self._most_recent_settled_ts = self._next_settlement_ts
+            logger.info(
+                f"Settlement cycle change: {self._next_settlement_ts} -> {nearest_settlement_ts}"
+            )
+        self._next_settlement_ts = nearest_settlement_ts
+
+        # Open window: pre_settlement_seconds to pre_open_seconds before settlement
+        time_to_settlement = nearest_settlement_ts - now_ts
+        if pre_seconds <= time_to_settlement <= pre_open_seconds:
+            return True
+
+        # Auto-close window: time_since >= post_close_seconds after most recent settlement
+        if self._most_recent_settled_ts is not None:
+            time_since_settlement = now_ts - self._most_recent_settled_ts
+            if time_since_settlement >= post_close_seconds:
+                return True
+
+        return False
 
     def _parse_time_window(self, window: str) -> tuple:
         """Parse time window string 'HH:MM-HH:MM' into (start_hour_float, end_hour_float)."""
@@ -297,6 +367,7 @@ class MonitorLoop:
             price_a=price_a,
             price_b=price_b,
             order_type=self._config.strategy.order_type,
+            rate_diff=opp.rate_diff_percent,
         )
 
         # Record position and trade
@@ -309,7 +380,10 @@ class MonitorLoop:
                 "quantity": quantity,
                 "quantity_a": quantity,
                 "quantity_b": quantity,
+                "fill_price_a": result.fill_price_a,
+                "fill_price_b": result.fill_price_b,
                 "open_time": result.timestamp,
+                "target_settlement": datetime.fromtimestamp(opp.next_settlement, tz=TZ_UTC8).strftime("%Y-%m-%d %H:%M:%S"),
             }
             self._current_positions[symbol] = position
             if self._db:
@@ -329,8 +403,12 @@ class MonitorLoop:
                 quantity_b=quantity,
                 side_a=opp.side_a,
                 side_b=opp.side_b,
+                profit=result.profit,
+                fill_price_a=result.fill_price_a,
+                fill_price_b=result.fill_price_b,
                 error_a=result.error_a,
                 error_b=result.error_b,
+                target_settlement=datetime.fromtimestamp(opp.next_settlement, tz=TZ_UTC8).strftime("%Y-%m-%d %H:%M:%S"),
             )
             logger.info(f"Trade recorded: {symbol} {result.status}")
 
@@ -339,7 +417,7 @@ class MonitorLoop:
             self._attempted_this_cycle[symbol] = "filled"
             self._notifier.send_arbitrage_result(opp, result)
         else:
-            # Failed: record reason, will be batch-notified at cycle end
+            # Failed: record reason and notify immediately
             error_parts = []
             if result.error_a:
                 error_parts.append(f"A: {result.error_a}")
@@ -348,6 +426,7 @@ class MonitorLoop:
             reason = f"{result.status} — {', '.join(error_parts)}" if error_parts else result.status
             self._attempted_this_cycle[symbol] = reason
             logger.warning(f"{symbol} arbitrage failed: {reason}")
+            self._notifier.send(f"[FAIL] {symbol}: {reason}")
 
     def get_current_rates(self) -> Dict:
         """Get current rates (for Web UI)."""
@@ -357,21 +436,49 @@ class MonitorLoop:
         """Get current positions."""
         return self._current_positions
 
-    def close_position(self, symbol: str):
-        """Close a position by placing reverse orders on both exchanges."""
+    def close_position(self, symbol: str) -> Dict:
+        """Close a position by placing reverse orders on both exchanges.
+
+        Returns dict with:
+            - status: 'closed' | 'partial' | 'failed'
+            - close_results: {exchange_name: {success, close_price, fee, error}}
+        """
         if symbol not in self._current_positions:
-            logger.warning(f"No open position for {symbol}")
-            return
+            # Position already closed (auto-close or manual), operation is effectively done
+            return {"status": "closed", "close_results": {}, "error": None}
+
+        if symbol in self._closing:
+            logger.warning(f"{symbol} already being closed, skipping")
+            return {"status": "failed", "close_results": {}, "error": "already_closing"}
+        self._closing[symbol] = True
 
         pos = self._current_positions[symbol]
+        trade_row = None
+        if self._db:
+            trade_row = self._db.get_open_trade(symbol)
+
+        close_price_a_total = None
+        close_price_b_total = None
+        fee_a_total = 0.0
+        fee_b_total = 0.0
         close_errors = []
 
         # Close on both exchanges
         for ex_name in [pos["high_exchange"], pos["low_exchange"]]:
             try:
                 adapter = self._adapters[ex_name]
-                adapter.close_position(symbol)
-                logger.info(f"Closed position on {ex_name} for {symbol}")
+                result = adapter.close_position(symbol)
+                logger.info(f"Closed position on {ex_name} for {symbol}: {result}")
+                if ex_name == pos["high_exchange"]:
+                    close_price_a_total = result.close_price_a
+                    fee_a_total = result.fee_a or 0.0
+                    if not result.success:
+                        close_errors.append(f"{ex_name}: {result.error_a or 'failed'}")
+                else:
+                    close_price_b_total = result.close_price_b
+                    fee_b_total = result.fee_b or 0.0
+                    if not result.success:
+                        close_errors.append(f"{ex_name}: {result.error_b or 'failed'}")
             except Exception as e:
                 logger.error(f"Failed to close on {ex_name} for {symbol}: {e}", exc_info=True)
                 close_errors.append(f"{ex_name}: {e}")
@@ -379,12 +486,67 @@ class MonitorLoop:
         # Remove from tracking
         self._current_positions.pop(symbol, None)
 
-        # Update database
+        # Update database — skip if trade not found (already closed) or no new data
         if self._db:
-            self._db.close_position(symbol)
-            close_result = "closed" if not close_errors else f"partial: {', '.join(close_errors)}"
-            self._db.update_trade_close(symbol, close_result)
-            logger.info(f"Position closed in database: {symbol} ({close_result})")
+            if trade_row is None:
+                logger.warning(f"No open trade found for {symbol} to update on close")
+            else:
+                self._db.close_position(symbol)
+                close_result = "closed" if not close_errors else f"partial: {', '.join(close_errors)}"
+
+                # Compute realized PnL: (close_price - fill_price) * qty - fee per side
+                # For arbitrage: high exchange long (buy low, sell high), low exchange short
+                realized_pnl = None
+                qty = trade_row.get("quantity_a") or trade_row.get("quantity") or 0
+                fill_a = trade_row.get("fill_price_a")
+                fill_b = trade_row.get("fill_price_b")
+                if fill_a and close_price_a_total and qty:
+                    pnl_a = (close_price_a_total - fill_a) * qty - fee_a_total
+                else:
+                    pnl_a = 0.0
+                if fill_b and close_price_b_total and qty:
+                    pnl_b = (fill_b - close_price_b_total) * qty - fee_b_total
+                else:
+                    pnl_b = 0.0
+                realized_pnl = pnl_a + pnl_b
+
+                self._db.update_trade_close(
+                    symbol,
+                    close_result,
+                    close_price_a=close_price_a_total,
+                    close_price_b=close_price_b_total,
+                    fee_a=fee_a_total or None,
+                    fee_b=fee_b_total or None,
+                    realized_pnl=realized_pnl,
+                )
+                logger.info(f"Position closed in database: {symbol} ({close_result}), pnl={realized_pnl}")
+
+        # Determine status from close_errors
+        if not close_errors:
+            status = "closed"
+        elif len(close_errors) == 2:
+            status = "failed"
+        else:
+            status = "partial"
+
+        # Build per-exchange results
+        close_results = {}
+        for ex_name in [pos["high_exchange"], pos["low_exchange"]]:
+            if ex_name == pos["high_exchange"]:
+                close_results[ex_name] = {
+                    "success": pos["high_exchange"] not in close_errors,
+                    "close_price": close_price_a_total,
+                    "fee": fee_a_total or None,
+                }
+            else:
+                close_results[ex_name] = {
+                    "success": pos["low_exchange"] not in close_errors,
+                    "close_price": close_price_b_total,
+                    "fee": fee_b_total or None,
+                }
+
+        self._closing.pop(symbol, None)
+        return {"status": status, "close_results": close_results}
 
     def get_next_settlement(self) -> Optional[datetime]:
         """Get next settlement time from real API data."""

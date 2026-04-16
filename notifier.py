@@ -48,6 +48,17 @@ class Notifier:
         )
         return self.send(msg)
 
+    def send_skip_reason(self, opportunity, reason: str, details: str = "") -> bool:
+        """Send notification when opportunity is skipped (e.g. no balance, position too small)."""
+        msg = (
+            f"[Skip] {opportunity.symbol}\n"
+            f"Pair: {opportunity.high_exchange} <-> {opportunity.low_exchange}\n"
+            f"Rate Diff: {opportunity.rate_diff_percent:.4f}%\n"
+            f"Reason: {reason}"
+            + (f"\nDetails: {details}" if details else "")
+        )
+        return self.send(msg)
+
     def _build_message(self, symbol, high_ex, low_ex, rate_diff, result) -> str:
         if self.detail_level == "detailed":
             lines = [

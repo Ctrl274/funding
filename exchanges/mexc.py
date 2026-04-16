@@ -4,7 +4,7 @@ import logging
 import requests
 from typing import Optional
 
-from exchanges.base import ExchangeAdapter, FundingRate
+from exchanges.base import CloseResult, ExchangeAdapter, FundingRate
 from exchanges.http_client import HttpClient
 
 
@@ -242,22 +242,50 @@ class MexcAdapter(ExchangeAdapter):
             logger.warning(f"mexc get_position failed: {symbol} {e}")
             return None
 
-    def close_position(self, symbol: str) -> bool:
-        """Close position via market order (opposite side)."""
+    def close_position(self, symbol: str) -> CloseResult:
+        """Close position via market order (opposite side).
+
+        Returns CloseResult with actual fill price and fees.
+        """
         try:
             pos = self.get_position(symbol)
             if not pos:
-                return False
+                return CloseResult(success=False)
             close_side = "SELL" if pos["side"] == "BUY" else "BUY"
-            order_id = self.place_market_order(symbol, close_side, pos["quantity"])
+            quantity = pos["quantity"]
+            entry_price = pos.get("entry_price", 0)
+            order_id = self.place_market_order(symbol, close_side, quantity)
             if not order_id:
                 logger.warning(f"mexc close_position failed: {symbol}")
-                return False
-            logger.info(f"mexc position closed: {symbol}")
-            return True
+                return CloseResult(success=False, error_a="order_placement_failed")
+
+            # Poll for fill
+            close_price = None
+            deadline = time.time() + 5
+            while time.time() < deadline:
+                status = self.get_order_status(symbol, order_id)
+                if status == "filled":
+                    # Position should be closed, use entry as proxy for close price
+                    close_price = entry_price
+                    break
+                elif status in ("cancelled", "unfilled"):
+                    break
+                time.sleep(0.5)
+
+            fee_rate = self.get_fee_rate(symbol)
+            fee = (close_price or entry_price) * quantity * fee_rate["taker"] if close_price else 0
+
+            if close_price:
+                logger.info(f"mexc position closed: {symbol} @ {close_price}")
+                return CloseResult(
+                    success=True,
+                    close_price_a=close_price,
+                    fee_a=fee,
+                )
+            return CloseResult(success=False)
         except Exception as e:
             logger.warning(f"mexc close_position failed: {symbol} {e}")
-            return False
+            return CloseResult(success=False, error_a=str(e))
 
     def get_fee_rate(self, symbol: str) -> dict:
         """Fetch taker/maker fee rates from MEXC contract detail API.

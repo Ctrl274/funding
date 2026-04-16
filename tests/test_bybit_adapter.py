@@ -1,6 +1,7 @@
 import pytest
 from unittest.mock import MagicMock, patch
 from exchanges.bybit import BybitAdapter
+from exchanges.base import CloseResult
 
 
 def test_get_funding_rates():
@@ -250,7 +251,43 @@ def test_get_position_no_position():
 
 def test_close_position():
     mock_http = MagicMock()
-    # get_position -> signed_get returns a position
+    # get_position -> signed_get returns a position (first call)
+    # then returns empty (position closed after fill)
+    mock_http.signed_get.side_effect = [
+        {  # first call: get_position
+            "retCode": 0,
+            "result": {
+                "list": [{
+                    "symbol": "BTCUSDT",
+                    "size": "1",
+                    "side": "Buy",
+                    "avgPrice": "50000",
+                }]
+            }
+        },
+        {  # second call: position closed -> empty
+            "retCode": 0,
+            "result": {"list": []}
+        },
+    ]
+    # place_market_order -> signed_post returns order ID
+    mock_http.signed_post.return_value = {
+        "retCode": 0,
+        "result": {"orderId": "close-order-1"}
+    }
+
+    with patch("exchanges.bybit.HttpClient", return_value=mock_http):
+        adapter = BybitAdapter("key", "secret")
+        adapter.get_order_status = MagicMock(return_value="filled")
+        result = adapter.close_position("BTC-USDT")
+
+    assert isinstance(result, CloseResult)
+    assert result.success is True
+
+
+def test_close_position_timeout_but_order_pending():
+    """Poll times out but order is still new/pending -> treat as success."""
+    mock_http = MagicMock()
     mock_http.signed_get.return_value = {
         "retCode": 0,
         "result": {
@@ -262,17 +299,48 @@ def test_close_position():
             }]
         }
     }
-    # place_market_order -> signed_post returns order ID
     mock_http.signed_post.return_value = {
         "retCode": 0,
-        "result": {"orderId": "close-order-1"}
+        "result": {"orderId": "pending-order-1"}
     }
 
     with patch("exchanges.bybit.HttpClient", return_value=mock_http):
         adapter = BybitAdapter("key", "secret")
+        # Simulate: order placed but never fills within 5s -> timeout -> still "new"
+        adapter.get_order_status = MagicMock(return_value="new")
         result = adapter.close_position("BTC-USDT")
 
-    assert result is True
+    assert isinstance(result, CloseResult)
+    assert result.success is True  # pending order treated as success
+    assert result.close_price_a == 50000.0  # entry price as proxy
+
+
+def test_close_position_timeout_and_order_cancelled():
+    """Poll times out and order was cancelled -> return failure."""
+    mock_http = MagicMock()
+    mock_http.signed_get.return_value = {
+        "retCode": 0,
+        "result": {
+            "list": [{
+                "symbol": "BTCUSDT",
+                "size": "1",
+                "side": "Buy",
+                "avgPrice": "50000",
+            }]
+        }
+    }
+    mock_http.signed_post.return_value = {
+        "retCode": 0,
+        "result": {"orderId": "cancelled-order-1"}
+    }
+
+    with patch("exchanges.bybit.HttpClient", return_value=mock_http):
+        adapter = BybitAdapter("key", "secret")
+        adapter.get_order_status = MagicMock(return_value="cancelled")
+        result = adapter.close_position("BTC-USDT")
+
+    assert isinstance(result, CloseResult)
+    assert result.success is False
 
 
 def test_get_ticker_price():

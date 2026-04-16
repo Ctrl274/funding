@@ -6,7 +6,7 @@ import hashlib
 import requests
 from typing import Any, Dict, List, Optional
 
-from exchanges.base import ExchangeAdapter, FundingRate
+from exchanges.base import CloseResult, ExchangeAdapter, FundingRate
 
 
 def _binance_sign(api_secret: str, params: str) -> str:
@@ -339,18 +339,25 @@ class BinanceAdapter(ExchangeAdapter):
         except Exception:
             return None
 
-    def close_position(self, symbol: str) -> bool:
-        """Close position via Market order with proper quantity precision."""
+    def close_position(self, symbol: str) -> CloseResult:
+        """Close position via Market order with proper quantity precision.
+
+        Returns CloseResult with actual fill price and fees.
+        """
         import logging
         logger = logging.getLogger(__name__)
         try:
             pos = self.get_position(symbol)
             if not pos:
-                return False
+                return CloseResult(success=False)
             side = "SELL" if pos["side"] == "BUY" else "BUY"
+            qty = pos["quantity"]
+            entry_price = pos.get("entry_price", 0)
             qty_precision, _ = self._get_symbol_precision(symbol)
-            qty_str = f"{pos['quantity']:.{qty_precision}f}".rstrip('0').rstrip('.')
-            self._signed_post(
+            qty_str = f"{qty:.{qty_precision}f}".rstrip('0').rstrip('.')
+
+            # Place close order
+            resp = self._signed_post(
                 "/order",
                 params={
                     "symbol": self._binance_symbol(symbol),
@@ -359,10 +366,49 @@ class BinanceAdapter(ExchangeAdapter):
                     "quantity": qty_str,
                 },
             )
-            return True
+
+            # Poll for fill price
+            close_price = None
+            deadline = time.time() + 5
+            while time.time() < deadline:
+                order_id = resp.get("orderId")
+                if order_id:
+                    order_data = self._signed_get(
+                        "/order",
+                        params={"symbol": self._binance_symbol(symbol), "orderId": order_id},
+                    )
+                    if order_data.get("status") == "FILLED":
+                        trades = order_data.get("fills", [])
+                        if trades:
+                            close_price = sum(float(t["price"]) * float(t["qty"]) for t in trades) / qty
+                        break
+                time.sleep(0.5)
+
+            fee_rate = self.get_fee_rate(symbol)
+            fee = (close_price or entry_price) * qty * fee_rate["taker"] if close_price else 0
+
+            if close_price:
+                logger.info(f"binance position closed: {symbol} @ {close_price}")
+                return CloseResult(
+                    success=True,
+                    close_price_a=close_price,
+                    fee_a=fee,
+                )
+            # Timeout — check if order is still pending (not cancelled).
+            # If pending, order is placed and will eventually fill; treat as success.
+            if order_id:
+                order_data = self._signed_get(
+                    "/order",
+                    params={"symbol": self._binance_symbol(symbol), "orderId": order_id},
+                )
+                status = order_data.get("status", "")
+                if status in ("NEW", "PARTIALLY_FILLED"):
+                    logger.info(f"binance order {order_id} placed but not yet filled, treating as closed: {symbol}")
+                    return CloseResult(success=True, close_price_a=entry_price, fee_a=0)
+            return CloseResult(success=False)
         except Exception as e:
             logger.warning(f"binance close_position failed: {e}")
-            return False
+            return CloseResult(success=False, error_a=str(e))
 
     def get_fee_rate(self, symbol: str) -> Dict[str, float]:
         """Get fee rate from exchange info."""

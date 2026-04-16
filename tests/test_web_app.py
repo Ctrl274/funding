@@ -36,13 +36,15 @@ class TestWebAppRoutes:
         assert isinstance(data, list)
 
     def test_history_endpoint_returns_list(self):
-        """GET /api/history 返回列表"""
+        """GET /api/history 返回分页字典"""
         app = create_app()
         client = app.test_client()
         resp = client.get("/api/history")
         assert resp.status_code == 200
         data = resp.get_json()
-        assert isinstance(data, list)
+        assert isinstance(data, dict)
+        assert "items" in data
+        assert "total" in data
 
     def test_config_endpoint_returns_dict(self):
         """GET /api/config 返回配置字典"""

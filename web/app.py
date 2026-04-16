@@ -48,10 +48,38 @@ def create_app(monitor_ref=None, config_ref=None, db_ref=None):
         settlement_ts = None
         countdown_seconds = None
         if monitor:
-            settlement_dt = monitor.get_next_settlement()
-            if settlement_dt:
-                settlement_ts = settlement_dt.timestamp()
-                countdown_seconds = math.floor(max(0, settlement_ts - time.time()))
+            # Use filtered rates (same logic as frontend) to get nearest settlement
+            all_rates = monitor.get_current_rates()
+            nearest_ts = None
+            for ex_rates in all_rates.values():
+                for fr in ex_rates.values():
+                    if fr.next_settlement <= 0:
+                        continue
+                    # Only consider symbols present in at least 2 exchanges
+                    count = sum(
+                        1 for ex, rates in all_rates.items()
+                        if fr.symbol in rates and rates[fr.symbol].next_settlement > 0
+                    )
+                    if count < 2:
+                        continue
+                    # Check settlement time diff < 5min across exchanges
+                    settlements = [
+                        rates[fr.symbol].next_settlement
+                        for rates in all_rates.values()
+                        if fr.symbol in rates and rates[fr.symbol].next_settlement > 0
+                    ]
+                    if not settlements:
+                        continue
+                    if max(settlements) - min(settlements) > 300:
+                        continue
+                    if nearest_ts is None or fr.next_settlement < nearest_ts:
+                        nearest_ts = fr.next_settlement
+
+            if nearest_ts:
+                settlement_ts = nearest_ts
+                from datetime import datetime, timezone, timedelta
+                settlement_dt = datetime.fromtimestamp(nearest_ts, tz=timezone(timedelta(hours=8)))
+                countdown_seconds = math.floor(max(0, nearest_ts - time.time()))
 
         return jsonify({
             "monitor_enabled": app.config_obj.monitor.enabled if app.config_obj else True,
@@ -92,7 +120,12 @@ def create_app(monitor_ref=None, config_ref=None, db_ref=None):
         monitor = app.monitor
         if not monitor:
             return jsonify([])
-        return jsonify(list(monitor.get_positions().values()))
+        result = []
+        for symbol, pos in monitor.get_positions().items():
+            item = dict(pos)
+            item["symbol"] = symbol
+            result.append(item)
+        return jsonify(result)
 
     @app.route("/api/positions/<symbol>/close", methods=["POST"])
     def api_close_position(symbol):
@@ -100,8 +133,12 @@ def create_app(monitor_ref=None, config_ref=None, db_ref=None):
         monitor = app.monitor
         if not monitor:
             return jsonify({"error": "monitor not available"}), 500
-        monitor.close_position(symbol)
-        return jsonify({"symbol": symbol, "status": "closed"})
+        result = monitor.close_position(symbol)
+        return jsonify({
+            "symbol": symbol,
+            "status": result.get("status", "closed"),
+            "close_results": result.get("close_results", {}),
+        })
 
     @app.route("/api/history")
     def api_history():
@@ -126,6 +163,10 @@ def create_app(monitor_ref=None, config_ref=None, db_ref=None):
         for ex in cfg.get("exchanges", {}).values():
             ex["api_key"] = "***" if ex.get("api_key") else ""
             ex["api_secret"] = "***" if ex.get("api_secret") else ""
+        # Convert seconds to minutes for display
+        for field in ("pre_open_seconds", "pre_settlement_seconds", "post_settlement_close_seconds"):
+            if field in cfg.get("strategy", {}):
+                cfg["strategy"][field] = cfg["strategy"][field] // 60
         return jsonify(cfg)
 
     @app.route("/api/config", methods=["POST"])
@@ -145,6 +186,12 @@ def create_app(monitor_ref=None, config_ref=None, db_ref=None):
                     return jsonify({"error": f"unknown config key: {key}"}), 400
                 if not isinstance(data[key], dict):
                     return jsonify({"error": f"config key '{key}' must be an object"}), 400
+
+            # Convert minutes to seconds for time-window fields (read-only, not user-settable)
+            # but still store correctly in case config file is manually edited
+            for field in ("pre_open_seconds", "pre_settlement_seconds", "post_settlement_close_seconds"):
+                if field in data.get("strategy", {}):
+                    data["strategy"][field] = data["strategy"][field] * 60
 
             def deep_update(target, source):
                 for key, value in source.items():

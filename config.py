@@ -28,7 +28,9 @@ class StrategyConfig:
     position_percent: float = 5.0
     leverage: int = 5
     max_concurrent: int = 3
-    pre_settlement_seconds: int = 600
+    pre_settlement_seconds: int = 300  # seconds before settlement to stop opening positions
+    pre_open_seconds: int = 900       # seconds before settlement to start opening positions
+    post_settlement_close_seconds: int = 120  # seconds after settlement to auto-close positions
     partial_fill_action: str = "cancel_and_stop"
 
 
@@ -93,7 +95,9 @@ class Config:
             position_percent=data.get("position_percent", 5.0),
             leverage=data.get("leverage", 5),
             max_concurrent=data.get("max_concurrent", 3),
-            pre_settlement_seconds=data.get("pre_settlement_seconds", 600),
+            pre_settlement_seconds=data.get("pre_settlement_seconds", 300),
+            pre_open_seconds=data.get("pre_open_seconds", 900),
+            post_settlement_close_seconds=data.get("post_settlement_close_seconds", 120),
             partial_fill_action=data.get("partial_fill_action", "cancel_and_stop"),
         )
 

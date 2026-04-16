@@ -1,7 +1,7 @@
 """Base classes for exchange adapters in the funding arbitrage system."""
 
 from abc import ABC, abstractmethod
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
 
@@ -17,6 +17,19 @@ class FundingRate:
     def rate_percent(self) -> float:
         """Return the funding rate as a percentage."""
         return self.rate * 100
+
+
+@dataclass
+class CloseResult:
+    """Position close result with actual PnL."""
+    success: bool
+    close_price_a: Optional[float] = None  # actual fill price on exchange A
+    close_price_b: Optional[float] = None  # actual fill price on exchange B
+    fee_a: Optional[float] = None          # trading fee on exchange A
+    fee_b: Optional[float] = None          # trading fee on exchange B
+    pnl: Optional[float] = None           # actual realized PnL (after fees)
+    error_a: Optional[str] = None
+    error_b: Optional[str] = None
 
 
 @dataclass(frozen=True)
@@ -122,8 +135,8 @@ class ExchangeAdapter(ABC):
         """Get current position. Returns dict or None."""
 
     @abstractmethod
-    def close_position(self, symbol: str) -> bool:
-        """Close the current position for a symbol."""
+    def close_position(self, symbol: str) -> CloseResult:
+        """Close the current position for a symbol. Returns CloseResult with PnL data."""
 
     @abstractmethod
     def get_fee_rate(self, symbol: str) -> Dict[str, float]:

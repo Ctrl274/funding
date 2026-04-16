@@ -155,6 +155,14 @@ class StrategyEngine:
         - MEXC: contract_size from API (e.g. 0.0001), quantity = usdt / (cs * price) (contracts)
         - BYDFi: contract_size=multiplier from API, same formula (contracts)
         """
+        if contract_size <= 0 or price <= 0 or usdt_amount <= 0:
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.warning(
+                f"contracts_from_usdt returned 0: usdt={usdt_amount}, "
+                f"price={price}, contract_size={contract_size}"
+            )
+            return 0
         return math.floor(usdt_amount / (contract_size * price))
 
     def clamp_quantity(

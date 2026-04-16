@@ -30,7 +30,8 @@ class TestExecuteArbitrage:
             adapter_b=adapter_b,
             side_a="BUY",
             side_b="SELL",
-            quantity=1,
+            quantity_a=1,
+            quantity_b=1,
             price_a=50000,
             price_b=50001,
         )
@@ -56,7 +57,8 @@ class TestExecuteArbitrage:
             adapter_b=adapter_b,
             side_a="BUY",
             side_b="SELL",
-            quantity=1,
+            quantity_a=1,
+            quantity_b=1,
             price_a=50000,
             price_b=50001,
         )
@@ -80,7 +82,8 @@ class TestExecuteArbitrage:
             adapter_b=adapter_b,
             side_a="BUY",
             side_b="SELL",
-            quantity=1,
+            quantity_a=1,
+            quantity_b=1,
             price_a=50000,
             price_b=50001,
         )
@@ -108,7 +111,8 @@ class TestExecuteArbitrage:
             adapter_b=adapter_b,
             side_a="BUY",
             side_b="SELL",
-            quantity=1,
+            quantity_a=1,
+            quantity_b=1,
             price_a=50000,
             price_b=50001,
         )
@@ -134,7 +138,8 @@ class TestExecuteArbitrage:
             adapter_b=adapter_b,
             side_a="BUY",
             side_b="SELL",
-            quantity=1,
+            quantity_a=1,
+            quantity_b=1,
             price_a=50000,
             price_b=50001,
         )
@@ -160,7 +165,8 @@ class TestExecuteArbitrage:
             adapter_b=adapter_b,
             side_a="BUY",
             side_b="SELL",
-            quantity=1,
+            quantity_a=1,
+            quantity_b=1,
             price_a=50000,
             price_b=50001,
         )
@@ -187,7 +193,8 @@ class TestExecuteArbitrage:
             adapter_b=adapter_b,
             side_a="BUY",
             side_b="SELL",
-            quantity=1,
+            quantity_a=1,
+            quantity_b=1,
             price_a=50000,
             price_b=50001,
         )
@@ -241,7 +248,8 @@ class TestGetOrderStatusUnknown:
             adapter_b=adapter_b,
             side_a="BUY",
             side_b="SELL",
-            quantity=1,
+            quantity_a=1,
+            quantity_b=1,
             price_a=50000,
             price_b=50001,
         )
@@ -270,7 +278,8 @@ class TestGetOrderStatusUnknown:
             adapter_b=adapter_b,
             side_a="BUY",
             side_b="SELL",
-            quantity=1,
+            quantity_a=1,
+            quantity_b=1,
             price_a=50000,
             price_b=50001,
         )
@@ -296,7 +305,8 @@ class TestGetOrderStatusUnknown:
             adapter_b=adapter_b,
             side_a="BUY",
             side_b="SELL",
-            quantity=1,
+            quantity_a=1,
+            quantity_b=1,
             price_a=50000,
             price_b=50001,
         )

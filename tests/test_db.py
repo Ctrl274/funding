@@ -82,6 +82,29 @@ class TestDatabaseTrades:
             assert result["items"][0]["profit"] == -0.5
             assert result["items"][0]["error_a"] == "status=unfilled"
 
+    def test_get_open_trade(self):
+        """get_open_trade returns the most recent open trade for a symbol"""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db = Database(os.path.join(tmpdir, "test.db"))
+            db.save_trade(symbol="BTC-USDT", high_exchange="bybit", low_exchange="binance",
+                         rate_diff=0.02, result="filled", quantity=100, profit=1.5)
+            db.save_trade(symbol="ETH-USDT", high_exchange="bybit", low_exchange="binance",
+                         rate_diff=0.01, result="filled", quantity=50, profit=0.5)
+            # BTC has an open trade, ETH is closed
+            db.update_trade_close("ETH-USDT", "closed")
+
+            open_btc = db.get_open_trade("BTC-USDT")
+            assert open_btc is not None
+            assert open_btc["symbol"] == "BTC-USDT"
+            assert open_btc["profit"] == 1.5
+            assert open_btc["close_time"] is None
+
+            open_eth = db.get_open_trade("ETH-USDT")
+            assert open_eth is None  # already closed
+
+            open_missing = db.get_open_trade("DOGE-USDT")
+            assert open_missing is None  # doesn't exist
+
 
 class TestDatabasePositions:
     def test_save_and_get_positions(self):

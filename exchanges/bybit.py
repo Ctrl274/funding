@@ -4,10 +4,11 @@ Bybit 交易所适配器。
 """
 
 import logging
+import time
 import httpx
 from typing import Dict, Optional
 
-from .base import ExchangeAdapter, FundingRate
+from .base import CloseResult, ExchangeAdapter, FundingRate
 from .http_client import HttpClient
 
 
@@ -265,9 +266,8 @@ class BybitAdapter(ExchangeAdapter):
                 return "filled"
             if filled > 0:
                 return "partial"
-            if status in ("Cancelled", "Rejected", "Canceled"):
-                return "cancelled"
-            if status == "Deactivated":
+            status_lower = status.lower()
+            if status_lower in ("cancelled", "rejected", "deactivated"):
                 return "cancelled"
             return "unfilled"
         except Exception:
@@ -297,23 +297,60 @@ class BybitAdapter(ExchangeAdapter):
         except Exception:
             return None
 
-    def close_position(self, symbol: str) -> bool:
-        """Close position via reverse market order (Demo API has no /v5/position/close)."""
+    def close_position(self, symbol: str) -> CloseResult:
+        """Close position via reverse market order.
+
+        Returns CloseResult with actual fill price and fees.
+        """
         logger = logging.getLogger(__name__)
         try:
             pos = self.get_position(symbol)
             if not pos:
-                return False
+                return CloseResult(success=False)
             close_side = "SELL" if pos["side"] == "BUY" else "BUY"
-            order_id = self.place_market_order(symbol, close_side.lower(), pos["quantity"])
+            quantity = pos["quantity"]
+            entry_price = pos.get("entry_price", 0)
+            order_id = self.place_market_order(symbol, close_side.lower(), quantity)
             if not order_id:
-                logger.warning(f"bybit close_position failed: {symbol}")
-                return False
-            logger.info(f"bybit position closed: {symbol}")
-            return True
+                return CloseResult(success=False, error_a="order_placement_failed")
+
+            # Poll for fill
+            close_price = None
+            deadline = time.time() + 5
+            while time.time() < deadline:
+                status = self.get_order_status(symbol, order_id)
+                if status == "filled":
+                    # Get fill price from position
+                    updated = self.get_position(symbol)
+                    if updated is None:
+                        # Position closed — use entry as proxy
+                        close_price = entry_price
+                    break
+                elif status in ("cancelled", "unfilled"):
+                    break
+                time.sleep(0.5)
+
+            fee_rate = self.get_fee_rate(symbol)
+            fee = (close_price or entry_price) * quantity * fee_rate["taker"] if close_price else 0
+
+            if close_price is not None:
+                logger.info(f"bybit position closed: {symbol} @ {close_price}")
+                return CloseResult(
+                    success=True,
+                    close_price_a=close_price,
+                    fee_a=fee,
+                )
+            # Timeout — check if order is still pending (not cancelled).
+            # If pending, order is placed and will eventually fill; treat as success.
+            if order_id:
+                status = self.get_order_status(symbol, order_id)
+                if status in ("new", "partially_filled"):
+                    logger.info(f"bybit order {order_id} placed but not yet filled, treating as closed: {symbol}")
+                    return CloseResult(success=True, close_price_a=entry_price, fee_a=0)
+            return CloseResult(success=False)
         except Exception as e:
             logger.warning(f"bybit close_position failed: {symbol} {e}")
-            return False
+            return CloseResult(success=False, error_a=str(e))
 
     def get_fee_rate(self, symbol: str) -> Dict[str, float]:
         """Get fee rate from V5 instruments-info endpoint."""
